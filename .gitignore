@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Generated protobuf stubs — regenerate with: bash scripts/generate_protos.sh
+generated/
+
+# Runtime artifacts
+logs/
+tests/service_logs/
+*.db
+run_all.pids
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDEs and editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

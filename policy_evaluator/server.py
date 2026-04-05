@@ -1,0 +1,63 @@
+import sys
+import os
+import logging
+from concurrent import futures
+
+import grpc
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'generated'))
+import killswitch_pb2
+import killswitch_pb2_grpc
+
+from engine import validate_change
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [policy_evaluator] %(levelname)s %(message)s',
+)
+log = logging.getLogger(__name__)
+
+PORT = 50052
+
+
+class PolicyEvaluatorServicer(killswitch_pb2_grpc.PolicyEvaluatorServicer):
+
+    def ValidateChange(self, request, context):
+        proposed = request.proposed_change
+        log.info(
+            "ValidateChange: flag='%s' enabled=%s changed_by='%s' context_flags=%d",
+            proposed.name,
+            proposed.enabled,
+            request.changed_by,
+            len(request.context_flags),
+        )
+
+        approved, denial_reason = validate_change(
+            proposed_flag=proposed,
+            context_flags=list(request.context_flags),
+        )
+
+        if approved:
+            log.info("Decision: APPROVED flag='%s'", proposed.name)
+        else:
+            log.info("Decision: DENIED flag='%s' reason='%s'", proposed.name, denial_reason)
+
+        return killswitch_pb2.PolicyResponse(
+            approved=approved,
+            denial_reason=denial_reason,
+        )
+
+
+def serve():
+    server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
+    killswitch_pb2_grpc.add_PolicyEvaluatorServicer_to_server(
+        PolicyEvaluatorServicer(), server
+    )
+    server.add_insecure_port(f'[::]:{PORT}')
+    server.start()
+    log.info("Policy Evaluator listening on port %d", PORT)
+    server.wait_for_termination()
+
+
+if __name__ == '__main__':
+    serve()
