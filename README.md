@@ -13,11 +13,9 @@
     Estafet merupakan sistem flag operasional ringan dan real-time berbasis Python yang dibangun untuk komunikasi antar layanan dalam suatu infrastrukutur melalui kerangka kerja gRPC. Sistem ini menyediakan cara terstruktur bagi layanan infrastruktur untuk mengubah perilaku operasional saat runtime, layaknya kill switch yang dapat menonaktifkan suatu subsistem yang mengalami degradasi, flag circuit breaker untuk mengalihkan traffic ke fallback, serta mode switch untuk menyesuaikan perilaku layanan saat terjadi insiden.
 </p>
 
-**Who it's for:** Platform engineering teams, SREs, and infrastructure engineers who need a programmable control plane for operational flags between internal services. It is designed to be forked and embedded into an existing system, not run as managed SaaS.
-
-**Core philosophy:** Flags represent operational state, not product decisions. Every flag change is validated by policy before it is accepted, broadcast to all subscribers in real time, and written to an immutable audit trail. The system is intentionally minimal — no web UI, no REST API, no external dependencies beyond grpcio and SQLite.
-
-**Why gRPC and not REST:** gRPC's server-streaming RPC type maps directly onto the push-notification pattern that flag distribution requires. A subscriber opens a single long-lived stream and receives flag updates as they happen, with no polling. Proto contracts enforce the message schema at both ends, catching integration errors at compile time rather than at runtime. For low-latency internal M2M communication, gRPC's binary framing also outperforms JSON/HTTP in both throughput and payload size.
+<p style="text-align: justify;">
+  Estafet ditujukan untuk tim platform engineering, SRE, dan engineer infrastruktur yang membutuhkan control plane yang dapat diprogram untuk flag operasional antar layanan internal. Sistem ini dirancang untuk di-*fork* dan di-*embed* ke dalam sistem yang sudah ada, bukan dijalankan sebagai layanan SaaS terkelola. Pada Estafet, flag merepresentasikan kondisi operasional, bukan keputusan produk, di mana setiap perubahan flag divalidasi oleh kebijakan sebelum diterima, disiarkan ke seluruh subscriber secara real-time, dan dicatat dalam audit trail yang immutable.
+</p>
 
 ## 2. Arsitektur
 
@@ -457,55 +455,39 @@ Expected sequence per successful `SetFlag`:
 
 A denied change stops at step 2. Nothing appears in the Broadcaster or Audit Logger logs.
 
----
-
-## 7. Project Structure
-
 ```
 gRPC-Kill-Switch-Relay/
 ├── protos/
-│   └── killswitch.proto          Single source of truth for all service contracts.
-│                                  Defines all 4 services, 9 RPCs, and 12 message types.
+│ └── killswitch.proto            # Sumber kebenaran tunggal untuk semua kontrak layanan.
 │
-├── generated/                     protoc output. Regenerate with scripts/generate_protos.sh.
-│   ├── killswitch_pb2.py          Message classes (do not edit).
-│   ├── killswitch_pb2_grpc.py     Stub and servicer classes (do not edit).
-│   └── __init__.py
+├── generated/                    # Output dari protoc.
+│ ├── killswitch_pb2.py           # Kelas pesan (jangan diedit).
+│ ├── killswitch_pb2_grpc.py      # Kelas stub dan servicer (jangan diedit).
+│ └── init.py
 │
 ├── flag_store/
-│   ├── server.py                  gRPC server. Wires the servicer to stubs for all 3
-│   │                              downstream services. Listens on port 50051.
-│   └── store.py                   SQLite read/write logic. Implements the full SetFlag
-│                                  flow: validate → persist → notify → log.
+│ ├── server.py                   # Server gRPC. Berjalan di port 50051.
+│ └── store.py                    # Logika baca/tulis SQLite.
 │
 ├── policy_evaluator/
-│   ├── server.py                  gRPC server. Listens on port 50052.
-│   └── engine.py                  Rule evaluation logic. Defines PROTECTED_FLAGS,
-│                                  MUTEX_PAIRS, and the maintenance window check.
-│                                  No database access.
+│ ├── server.py                   # Server gRPC. Berjalan di port 50052.
+│ └── engine.py                   # Logika evaluasi aturan. Mendefinisikan PROTECTED_FLAGS, MUTEX_PAIRS, dan pengecekan maintenance window.
 │
 ├── broadcaster/
-│   ├── server.py                  gRPC server. Listens on port 50053.
-│   └── subscriber_manager.py      Thread-safe subscriber queue list. Handles add,
-│                                  remove, fan-out, and shutdown sentinel.
+│ ├── server.py                   # Server gRPC. Berjalan di port 50053.
+│ └── subscriber_manager.py       # Daftar queue subscriber yang thread-safe. Menangani penambahan, penghapusan, distribusi (fan-out), dan sentinel shutdown.
 │
 ├── audit_logger/
-│   ├── server.py                  gRPC server. Listens on port 50054.
-│   └── logger.py                  SQLite persistence for audit records. Manages
-│                                  live StreamHistory subscriber queues.
+│ ├── server.py                   # Server gRPC. Berjalan di port 50054.
+│ └── logger.py                   # Persistensi SQLite untuk catatan audit.
 │
 ├── scripts/
-│   ├── generate_protos.sh         Installs grpcio-tools, runs protoc, verifies output.
-│   └── run_all.sh                 Starts all 4 services in dependency order with
-│                                  port readiness checks and clean EXIT trap shutdown.
+│ ├── generate_protos.sh          # Menginstal grpcio-tools, menjalankan protoc, dan memverifikasi output.
+│ └── run_all.sh                  # Menjalankan keempat layanan sesuai urutan dependensi.
 │
 └── tests/
-    └── integration_test.py        Starts all 4 services as subprocesses, runs 4
-                                   end-to-end scenarios, asserts on every step,
-                                   then shuts down. Includes maintenance window guard.
+└── integration_test.py           # Menjalankan keempat layanan sebagai subprocess untuk pengujian.
 ```
-
----
 
 ## 8. Configuration
 
@@ -535,46 +517,3 @@ MAINTENANCE_WINDOW_UTC = (2, 4)   # 02:00–04:00 UTC+7 (Asia/Jakarta)
 ```
 
 To add a new protected flag, add its name to `PROTECTED_FLAGS`. To add a mutex pair, append a tuple to `MUTEX_PAIRS`. To change the timezone, replace `_TZ_JAKARTA` with the appropriate `datetime.timezone(datetime.timedelta(hours=N))` and update the comment.
-
-### Example flag names (used in tests and evaluation)
-
-| Flag name | Represents |
-|---|---|
-| `payment-fallback` | Fallback path for the payment processor. Protected. |
-| `cache-only-mode` | Service serves exclusively from cache, bypasses live data. |
-| `disable-cache-refresh` | Stops background cache refresh jobs. Mutex with `cache-only-mode`. |
-| `disable-recommendations` | Kill switch for the recommendation engine. |
-
-### Port assignments
-
-| Service | Port |
-|---|---|
-| Flag Store | 50051 |
-| Policy Evaluator | 50052 |
-| Broadcaster | 50053 |
-| Audit Logger | 50054 |
-
-Ports are hardcoded in each service's `server.py` and in the Flag Store's outbound channel configuration.
-
----
-
-## 9. Limitations and Future Work
-
-### v1 limitations
-
-**Security:** There is no authentication, authorization, or TLS. Any process that can reach the service ports can read and modify any flag. This makes v1 suitable only for trusted internal networks or local development. For production use, mTLS with service identity certificates is the appropriate control.
-
-**Persistence model:** SQLite supports only a single writer at a time. The Flag Store and Audit Logger each hold a single connection with a threading lock. This is sufficient for low-to-moderate write rates on a single machine but does not support horizontal scaling.
-
-**Subscription reliability:** `SubscribeFlags` and `StreamHistory` are live feeds only. A client that disconnects misses updates and has no way to request a replay of what it missed. Reconnecting clients must call `GetFlag`/`ListFlags` to resynchronize. A persistent subscription model (where the server tracks each subscriber's last-seen offset) would require a more stateful broadcaster and is not implemented.
-
-**Observability:** Logging is written to files and stdout. There is no metrics endpoint, no tracing, and no structured log format. Integration with Prometheus or OpenTelemetry would require adding instrumentation to each servicer method.
-
-### What v2 might include
-
-- **mTLS + service identity** — each service presents a certificate; the Flag Store only accepts policy and broadcast calls from authenticated peers.
-- **Token-based authorization** — callers supply a token in gRPC metadata; the Flag Store validates it before processing `SetFlag`.
-- **Persistent subscriptions with replay** — subscribers register with a client ID; the Broadcaster tracks the last update delivered to each and replays missed updates on reconnect.
-- **Admin CLI** — a small Python client for `SetFlag`, `GetFlag`, `ListFlags`, and `GetHistory` via the command line, for use in incident response without writing a REPL session.
-- **Flag namespacing** — a `namespace` field on `Flag` to support multi-team or multi-environment deployments on a shared relay.
-- **Configurable rules** — load `PROTECTED_FLAGS`, `MUTEX_PAIRS`, and window settings from a YAML or TOML file instead of hardcoding them, enabling rule changes without a service restart.
