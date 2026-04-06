@@ -1,8 +1,17 @@
-# Kill Switch Relay
+# Estafet v1: Codename Mannheim
 
-## 1. Project Overview
+## Anggota
 
-Kill Switch Relay is a lightweight, real-time operational flag system built for machine-to-machine communication over gRPC. It provides a structured way for infrastructure services to toggle operational behaviors at runtime — kill switches that disable a degraded subsystem, circuit breaker flags that redirect traffic to fallbacks, and mode switches that alter service behavior during incidents. It is not a user-facing feature flag tool and is not designed for A/B testing or product experimentation.
+| Nama | NRP|
+|-------------------------------|---------------|
+| Ahmad Wildan Fawwaz| 5027241001 |
+| Muhammad Rakha Hananditya R.| 5027241015 |
+
+## 1. Gambaran Umum
+
+<p align="justify">
+    Estafet merupakan sistem flag operasional ringan dan real-time berbasis Python yang dibangun untuk komunikasi antar layanan dalam suatu infrastrukutur melalui kerangka kerja gRPC. Sistem ini menyediakan cara terstruktur bagi layanan infrastruktur untuk mengubah perilaku operasional saat runtime, layaknya kill switch yang dapat menonaktifkan suatu subsistem yang mengalami degradasi, flag circuit breaker untuk mengalihkan traffic ke fallback, serta mode switch untuk menyesuaikan perilaku layanan saat terjadi insiden.
+</p>
 
 **Who it's for:** Platform engineering teams, SREs, and infrastructure engineers who need a programmable control plane for operational flags between internal services. It is designed to be forked and embedded into an existing system, not run as managed SaaS.
 
@@ -10,94 +19,121 @@ Kill Switch Relay is a lightweight, real-time operational flag system built for 
 
 **Why gRPC and not REST:** gRPC's server-streaming RPC type maps directly onto the push-notification pattern that flag distribution requires. A subscriber opens a single long-lived stream and receives flag updates as they happen, with no polling. Proto contracts enforce the message schema at both ends, catching integration errors at compile time rather than at runtime. For low-latency internal M2M communication, gRPC's binary framing also outperforms JSON/HTTP in both throughput and payload size.
 
----
+## 2. Arsitektur
 
-## 2. Architecture
+### Layanan
 
-### Services
-
-| Service | Port | Role |
+| Layanan | Port | Peran |
 |---|---|---|
-| Flag Store | 50051 | Source of truth for all flag state. Owns reads, writes, and orchestrates the change flow. |
-| Policy Evaluator | 50052 | Stateless gatekeeper. Validates every proposed change against configured rules before it is committed. |
-| Broadcaster | 50053 | Manages subscriber streams. Receives change notifications from the Flag Store and fans them out to all connected clients. |
-| Audit Logger | 50054 | Persistence layer for the change history. Records every committed change and exposes it via query and live stream. |
+| Flag Store | 50051 | Sumber kebenaran (source of truth) untuk seluruh status flag. Menangani operasi baca, tulis, dan mengorkestrasi alur perubahan. |
+| Policy Evaluator | 50052 | Gatekeeper stateless. Memvalidasi setiap perubahan yang diajukan terhadap aturan yang dikonfigurasi sebelum disimpan. |
+| Broadcaster | 50053 | Mengelola stream subscriber. Menerima notifikasi perubahan dari `Flag Store` dan mendistribusikannya ke semua klien yang terhubung. |
+| Audit Logger | 50054 | Lapisan persistensi untuk riwayat perubahan. Mencatat setiap perubahan yang telah disimpan dan menyediakannya melalui query dan stream langsung. |
 
-### RPC Table
+### Tabel RPC
 
-| RPC | Service | Type | Description |
+| RPC | Layanan | Tipe gRPC | Deskripsi |
 |---|---|---|---|
-| `SetFlag` | Flag Store | Unary | Submit a flag change. Triggers the full validate → persist → notify → log flow. |
-| `GetFlag` | Flag Store | Unary | Read the current state of a single flag by name. |
-| `ListFlags` | Flag Store | Unary | Return all flags. |
-| `ValidateChange` | Policy Evaluator | Unary | Evaluate a proposed change against all rules. Returns approved/denied with reason. |
-| `SubscribeFlags` | Broadcaster | Server-streaming | Open a live stream. Receive a `FlagUpdate` message each time any flag changes. |
-| `NotifyChange` | Broadcaster | Unary | Called by Flag Store to push an update to all active subscribers. |
-| `LogChange` | Audit Logger | Unary | Persist a single change record. |
-| `GetHistory` | Audit Logger | Unary | Query the audit log, optionally filtered by flag name and limited by count. |
-| `StreamHistory` | Audit Logger | Server-streaming | Receive new audit records in real time as they are written. |
+| `SetFlag` | Flag Store | Unary | Mengirim perubahan flag. Memicu alur lengkap: validasi → simpan → notifikasi → pencatatan. |
+| `GetFlag` | Flag Store | Unary | Membaca status terkini dari satu flag berdasarkan nama. |
+| `ListFlags` | Flag Store | Unary | Mengembalikan semua flag. |
+| `ValidateChange` | Policy Evaluator | Unary | Mengevaluasi perubahan yang diajukan terhadap semua aturan. Mengembalikan hasil disetujui/ditolak beserta alasannya. |
+| `SubscribeFlags` | Broadcaster | Server-streaming | Membuka stream langsung. Menerima pesan `FlagUpdate` setiap kali ada perubahan flag. |
+| `NotifyChange` | Broadcaster | Unary | Dipanggil oleh Flag Store untuk mendorong update ke semua subscriber aktif. |
+| `LogChange` | Audit Logger | Unary | Menyimpan satu catatan perubahan. |
+| `GetHistory` | Audit Logger | Unary | Mengambil audit log, opsional difilter berdasarkan nama flag dan dibatasi jumlahnya. |
+| `StreamHistory` | Audit Logger | Server-streaming | Menerima catatan audit baru secara real-time saat ditulis. |
 
-### SetFlag Flow (end-to-end)
+### Alur Kerja Sistem
 
-1. A client sends `SetFlag(FlagChangeRequest)` to the Flag Store (50051).
-2. Flag Store reads the current state of the target flag from SQLite. It also reads all flags to build the policy context.
-3. Flag Store calls `PolicyEvaluator.ValidateChange` (50052), passing the current flag state, the proposed new state, and all current flags as context. This allows the Policy Evaluator to enforce rules that depend on other flags (e.g., mutex pairs) without querying the database itself.
-4. If the Policy Evaluator returns `approved: false`, Flag Store returns `FlagChangeResponse(success: false)` immediately. Nothing is written. Steps 5–7 do not execute.
-5. If approved, Flag Store writes the new flag state to SQLite with an upsert.
-6. Flag Store calls `Broadcaster.NotifyChange` (50053) with a `FlagUpdate`. The Broadcaster fans it out to every active `SubscribeFlags` stream.
-7. Flag Store calls `AuditLogger.LogChange` (50054) with an `AuditRecord` containing the old value, new value, who made the change, why, and the policy result.
-8. Flag Store returns `FlagChangeResponse(success: true)` to the caller.
+<ol style="text-align: justify;">
+  <li>
+    Pengguna mengirim <code>SetFlag(FlagChangeRequest)</code> ke Flag Store (50051).
+  </li>
+  <li>
+    Flag Store membaca status saat ini dari flag target dari SQLite. Selain itu, Flag Store juga membaca semua flag untuk membangun konteks kebijakan.
+  </li>
+  <li>
+    Flag Store memanggil <code>PolicyEvaluator.ValidateChange</code> (50052), dengan mengirimkan status flag saat ini, status baru yang diusulkan, serta seluruh flag sebagai konteks. Hal ini memungkinkan Policy Evaluator menegakkan aturan yang bergantung pada flag lain (misalnya pasangan mutual exclusion) tanpa perlu mengakses database secara langsung.
+  </li>
+  <li>
+    Jika Policy Evaluator mengembalikan <code>approved: false</code>, maka Flag Store langsung mengembalikan <code>FlagChangeResponse(success: false)</code>. Tidak ada data yang ditulis. Langkah selanjutnya tidak dijalankan.
+  </li>
+  <li>
+    Jika disetujui atau <code>approved: true</code>, Flag Store menulis status flag baru ke SQLite menggunakan mekanisme upsert.
+  </li>
+  <li>
+    Flag Store memanggil <code>Broadcaster.NotifyChange</code> (50053) dengan <code>FlagUpdate</code>. Broadcaster kemudian mendistribusikan perubahan tersebut ke semua stream <code>SubscribeFlags</code> yang aktif.
+  </li>
+  <li>
+    Flag Store memanggil <code>AuditLogger.LogChange</code> (50054) dengan <code>AuditRecord</code> yang berisi nilai lama, nilai baru, siapa yang melakukan perubahan, alasan perubahan, serta hasil evaluasi kebijakan.
+  </li>
+  <li>
+    Flag Store mengembalikan <code>FlagChangeResponse(success: true)</code> kepada pengguna.
+  </li>
+</ol>
 
-### Failure Handling
+## 3. Fitur
 
-Steps 6 and 7 (Broadcaster and Audit Logger) are non-fatal. Each is wrapped in an independent `try/except`. If either service is unreachable or returns an error, the Flag Store logs a warning with the flag name, target service, and error message, then continues. The flag change has already been committed to SQLite at that point and the caller receives `success: true`.
+### Apa yang Bisa Dilakukan Sistem
 
-This is a deliberate eventual-consistency trade-off: SQLite is the source of truth. A subscriber that misses an update due to a transient Broadcaster outage can call `GetFlag` or `ListFlags` to catch up. An audit record that fails to write is a visibility gap, not a data integrity problem.
+<ul style="text-align: justify;">
+  <li>
+    <b>Propagasi flag real-time</b>: Klien cukup berlangganan sekali dan akan menerima pembaruan melalui RPC server-streaming yang persisten. Tanpa polling.
+  </li>
+  <li>
+    <b>Penegakan kebijakan</b>: Setiap perubahan divalidasi sebelum disimpan. Tiga jenis aturan didukung: protected flags (tidak dapat dinonaktifkan), mutex pairs (dua flag yang tidak dapat aktif bersamaan), dan maintenance window berbasis waktu.
+  </li>
+  <li>
+    <b>Evaluasi kebijakan berbasis konteks</b>: Flag Store mengirimkan status seluruh flag saat ini ke Policy Evaluator pada setiap pemanggilan, memungkinkan aturan lintas-flag tanpa memberikan akses database ke Policy Evaluator.
+  </li>
+  <li>
+    <b>Audit trail lengkap</b>: Setiap perubahan yang disimpan dicatat di SQLite dengan nilai lama, nilai baru, siapa yang mengubah, alasan perubahan, serta hasil evaluasi kebijakan. Dapat di-query berdasarkan nama flag dengan batas jumlah opsional.
+  </li>
+  <li>
+    <b>Streaming audit langsung</b>: <code>StreamHistory</code> mengirimkan catatan audit baru secara real-time saat ditulis, yang dapat digunakan untuk kebutuhan monitoring langsung.
+  </li>
+  <li>
+    <b>Graceful Degradation</b>: Gangguan pada Broadcaster dan Audit Logger tidak menghambat perubahan flag. Jalur inti baca/tulis (Flag Store + Policy Evaluator) adalah sistem minimal yang tetap berjalan.
+  </li>
+  <li>
+    <b>Deployment dan pengujian layanan independen</b>: Policy Evaluator dan Audit Logger tidak memiliki dependensi terhadap layanan lain dan dapat dijalankan serta diuji secara terpisah.
+  </li>
+</ul>
 
-Policy Evaluator failures are fatal to the request. If the Policy Evaluator is unreachable, `SetFlag` returns an error to the caller. No change is written.
+### Apa yang Tidak Bisa Dilakukan Sistem
 
----
+<ul style="text-align: justify;">
+  <li>
+    <b>Tidak ada autentikasi atau otorisasi</b>: Siapapun dapat mengirim perubahan flag.
+  </li>
+  <li>
+    <b>Tidak ada TLS atau enkripsi</b>: Semua channel gRPC tidak aman. Jangan mengekspos port ini selain ke jaringan yang terpercaya.
+  </li>
+  <li>
+    <b>Tidak ada subscription persisten</b>: Jika <code>SubscribeFlags</code> pengguna terputus, maka pembaruan yang terjadi selama offline akan terlewat. Pengguna harus memanggil <code>GetFlag</code> atau <code>ListFlags</code> saat tersambung kembali untuk sinkronisasi. <code>StreamHistory</code> memiliki perilaku yang sama.
+  </li>
+  <li>
+    <b>Tidak ada horizontal scaling</b>: Setiap layanan berjalan sebagai satu instance. Flag Store dan Audit Logger menggunakan SQLite yang tidak mendukung penulisan paralel lintas proses.
+  </li>
+  <li>
+    <b>Tidak ada namespacing flag atau multi-tenancy</b>: Semua flag berada dalam satu namespace. Tidak ada konsep environment atau kepemilikan flag.
+  </li>
+  <li>
+    <b>Tidak ada UI atau dashboard</b>: Interaksi operasional dilakukan melalui klien gRPC (snippet Python yang disediakan, grpcurl, atau CLI yang telah disediakan).
+  </li>
+  <li>
+    <b>Tidak ada REST atau HTTP API</b>: Sistem hanya berupa gRPC. Ini bukan keterbatasan yang harus dihindari, melainkan bagian dari desain.
+  </li>
+  <li>
+    <b>Bukan pengganti LaunchDarkly, Flagsmith, atau platform serupa</b>: Alat-alat tersebut dirancang untuk eksperimen produk, rollout bertahap, dan targeting pengguna. Estafet dirancang untuk kontrol operasional biner antar layanan infrastruktur.
+  </li>
+</ul>
 
-## 3. Features
+## 4. Prasyarat
 
-### What it can do
-
-- **Real-time flag propagation** — clients subscribe once and receive updates via a persistent server-streaming RPC. No polling.
-- **Policy enforcement** — every change is validated before it is committed. Three rule types are supported: protected flags (cannot be disabled), mutex pairs (two flags that cannot both be enabled simultaneously), and time-based maintenance windows.
-- **Context-aware policy evaluation** — the Flag Store passes the current state of all flags to the Policy Evaluator on each call, enabling cross-flag rules without giving the Policy Evaluator database access.
-- **Full audit trail** — every committed change is recorded in SQLite with old value, new value, who changed it, why, and the policy outcome. Queryable by flag name with optional limit.
-- **Live audit streaming** — `StreamHistory` delivers new audit records in real time as they are written, for live monitoring use cases.
-- **Graceful degradation** — Broadcaster and Audit Logger outages do not block flag changes. The core read/write path (Flag Store + Policy Evaluator) is the minimal viable system.
-- **Independent service deployment and testing** — Policy Evaluator and Audit Logger have no dependencies on other services and can be started and tested in isolation.
-
-### What it cannot do
-
-- **No authentication or authorization** — any caller can submit a flag change. This is a v1 limitation; see Section 9.
-- **No TLS or encryption** — all gRPC channels are insecure. Do not expose these ports outside a trusted network.
-- **No persistent subscriptions** �� if a `SubscribeFlags` client disconnects, it misses any updates that occurred while it was offline. It must call `GetFlag` or `ListFlags` on reconnect to synchronize state. `StreamHistory` has the same behavior.
-- **No horizontal scaling** — each service is a single instance. The Flag Store and Audit Logger use SQLite, which does not support concurrent writers across processes.
-- **No flag namespacing or multi-tenancy** — all flags share a single namespace. There is no concept of environments, projects, or owners.
-- **No UI or dashboard** — operational interaction is via gRPC clients (the provided Python snippets, grpcurl, or custom clients).
-- **No REST or HTTP API** — gRPC only. This is not a limitation to work around; it is a design constraint.
-- **Not a replacement for LaunchDarkly, Flagsmith, or similar platforms** — those tools are designed for product experimentation, gradual rollouts, and user targeting. Kill Switch Relay is designed for binary operational control between infrastructure services.
-
----
-
-## 4. Prerequisites
-
-- Python 3.10 or later (tested on 3.14)
-- `grpcio` and `grpcio-tools` — installed automatically by `generate_protos.sh`, or manually:
-
-```bash
-pip install grpcio grpcio-tools protobuf
-```
-
-- No external database. SQLite is used via the Python standard library.
-- No Docker, no message broker, no additional infrastructure.
-
-> **Python 3.14 note:** Daemon subscriber threads holding open gRPC stream iterators at interpreter shutdown will produce a `Fatal Python error: _enter_buffered_busy` abort message. All test assertions pass before shutdown; this is a Python 3.14 finalization quirk and does not affect correctness.
-
----
+- Python 3.10 atau versi lebih baru.
+- `grpcio` and `grpcio-tools`.
 
 ## 5. Getting Started
 
