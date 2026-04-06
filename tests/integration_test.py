@@ -74,7 +74,7 @@ def wait_for_service(addr, name, timeout=15):
 
 
 def clean_db_files():
-    for path in ('flag_store/flags.db', 'audit_logger/audit.db'):
+    for path in ('data/flags.db', 'data/audit.db'):
         full = os.path.join(REPO_ROOT, path)
         if os.path.exists(full):
             os.remove(full)

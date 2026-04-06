@@ -1,0 +1,32 @@
+[services.flag_store]
+host = "localhost"
+port = 50051
+db_path = "data/flags.db"
+
+[services.policy_evaluator]
+host = "localhost"
+port = 50052
+
+[services.broadcaster]
+host = "localhost"
+port = 50053
+
+[services.audit_logger]
+host = "localhost"
+port = 50054
+db_path = "data/audit.db"
+
+[logging]
+level = "INFO"
+directory = "logs"
+max_size_mb = 10
+backup_count = 3
+
+[client]
+connection_timeout = 10
+retry_attempts = 5
+retry_backoff = 1.0
+
+[seed_data]
+auto_prompt = true
+file = "config/seed_flags.toml"

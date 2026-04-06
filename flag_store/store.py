@@ -5,11 +5,9 @@ import time
 
 from generated import killswitch_pb2
 
-# Setup Logging agar Store Bisa Log Aktivitas
-
 log = logging.getLogger(__name__)
 
-DB_PATH = 'flag_store/flags.db'
+DB_PATH = 'data/flags.db'
 
 
 class FlagStore:
@@ -33,8 +31,6 @@ class FlagStore:
             ''')
             self._conn.commit()
 
-    # Helper Methods
-
     def _get_row(self, name):
         cursor = self._conn.execute(
             'SELECT name, enabled, description, updated_at, updated_by FROM flags WHERE name = ?',
@@ -53,8 +49,6 @@ class FlagStore:
         return [{'name': r[0], 'enabled': bool(r[1]), 'description': r[2]}
                 for r in cursor.fetchall()]
 
-    # Implementasi RPC
-
     def set_flag(self, request, policy_stub, broadcaster_stub, audit_stub):
         proposed = request.flag
         changed_by = request.changed_by
@@ -66,8 +60,6 @@ class FlagStore:
             all_rows = self._list_rows()
 
         old_enabled = current_row['enabled'] if current_row else False
-
-        # Validasi Flag Baru dengan Policy Evaluator
 
         current_flag_proto = killswitch_pb2.Flag(
             name=proposed.name,
@@ -95,8 +87,6 @@ class FlagStore:
             log.info("SetFlag denied: flag='%s' reason='%s'", proposed.name, policy_resp.denial_reason)
             return False, policy_resp.denial_reason
 
-        # Persist Perubahan ke DB
-
         with self._lock:
             self._conn.execute(
                 '''INSERT INTO flags (name, enabled, description, updated_at, updated_by)
@@ -111,8 +101,6 @@ class FlagStore:
             self._conn.commit()
         log.info("Persisted: flag='%s' enabled=%s by='%s'", proposed.name, proposed.enabled, changed_by)
 
-        # Broadcast Perubahan Flag ke Subscriber
-        
         flag_update = killswitch_pb2.FlagUpdate(
             flag=proposed,
             changed_by=changed_by,
@@ -123,8 +111,6 @@ class FlagStore:
             broadcaster_stub.NotifyChange(flag_update)
         except Exception as e:
             log.warning("Broadcaster notification failed for flag='%s': %s", proposed.name, e)
-
-        # Audit Log Perubahan
 
         audit_record = killswitch_pb2.AuditRecord(
             flag_name=proposed.name,
@@ -142,13 +128,9 @@ class FlagStore:
 
         return True, "ok"
 
-    # RPC untuk Mengambil Detail Status Satu Flag Tertentu
-
     def get_flag(self, name):
         with self._lock:
             return self._get_row(name)
-
-    # RPC untuk Mengambil Daftar Semua Flag yang Tersedia beserta Statusnya
 
     def list_flags(self):
         with self._lock:

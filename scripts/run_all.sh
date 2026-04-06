@@ -7,6 +7,7 @@ LOG_DIR="$REPO_ROOT/logs"
 PID_FILE="$REPO_ROOT/run_all.pids"
 
 mkdir -p "$LOG_DIR"
+mkdir -p "$REPO_ROOT/data"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Cleanup: kill all services on exit (Ctrl+C, SIGTERM, or normal exit)

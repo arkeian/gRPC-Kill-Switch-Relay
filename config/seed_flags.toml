@@ -1,0 +1,24 @@
+[[flags]]
+name = "payment-fallback"
+enabled = true
+description = "Payment circuit breaker fallback mode"
+
+[[flags]]
+name = "fraud-detection"
+enabled = true
+description = "Fraud detection engine toggle"
+
+[[flags]]
+name = "disable-recommendations"
+enabled = false
+description = "Recommendation engine kill switch"
+
+[[flags]]
+name = "cache-only-mode"
+enabled = false
+description = "Serve responses from cache only, skip upstream calls"
+
+[[flags]]
+name = "slow-mode"
+enabled = false
+description = "Throttle incoming requests to reduce system load"

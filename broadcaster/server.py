@@ -1,3 +1,4 @@
+import os
 import logging
 import queue
 from concurrent import futures
@@ -9,15 +10,36 @@ from generated import killswitch_pb2_grpc
 
 from .subscriber_manager import SubscriberManager, _SENTINEL
 
-# Setup Logging agar Server Bisa Log Aktivitas Service
+try:
+    import tomli
+except ModuleNotFoundError:
+    import tomllib as tomli
+
+def _load_config():
+    config_path = os.environ.get('GRUS_CONFIG', '')
+    if config_path and os.path.isfile(config_path):
+        with open(config_path, 'rb') as f:
+            return tomli.load(f)
+    return {}
+
+_cfg = _load_config()
+
+PORT = _cfg.get('services', {}).get('broadcaster', {}).get('port', 50053)
+
+_log_cfg = _cfg.get('logging', {})
+_log_dir = _log_cfg.get('directory', 'logs')
+os.makedirs(_log_dir, exist_ok=True)
+
+_handlers = [logging.StreamHandler()]
+if _cfg:
+    _handlers.append(logging.FileHandler(os.path.join(_log_dir, 'broadcaster.log')))
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, _log_cfg.get('level', 'INFO')),
     format='%(asctime)s [broadcaster] %(levelname)s %(message)s',
+    handlers=_handlers,
 )
 log = logging.getLogger(__name__)
-
-PORT = 50053
 
 
 class BroadcasterServicer(killswitch_pb2_grpc.BroadcasterServicer):
@@ -25,30 +47,24 @@ class BroadcasterServicer(killswitch_pb2_grpc.BroadcasterServicer):
     def __init__(self, manager):
         self._manager = manager
 
-    # Metode RPC untuk Mengirim Notifikasi Perubahan Flag ke Subscriber
-
     def NotifyChange(self, request, context):
         self._manager.notify_all(request)
         return killswitch_pb2.Empty()
 
-    # Server-streaming RPC: Client subscribe dan Server mengirim update flag secara kontinu sampai client disconnect atau server shutdown
-
     def SubscribeFlags(self, request, context):
-        q = queue.Queue() # Setiap subscriber mendapat queue sendiri untuk menerima update
+        q = queue.Queue()
         self._manager.add(q)
         try:
             while context.is_active():
                 try:
-                    update = q.get(timeout=1.0) # Ambil update dengan timeout agar tetap bisa cek status koneksi
+                    update = q.get(timeout=1.0)
                 except queue.Empty:
                     continue
-                if update is _SENTINEL: # Jika menerima sentinel: Hentikan stream (shutdown signal)
+                if update is _SENTINEL:
                     break
                 yield update
-        finally:    
+        finally:
             self._manager.remove(q)
-
-# Inisialisasi dan menjalankan gRPC server Broadcaster
 
 def serve():
     manager = SubscriberManager()

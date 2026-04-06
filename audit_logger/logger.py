@@ -5,9 +5,7 @@ import threading
 
 log = logging.getLogger(__name__)
 
-DB_PATH = 'audit_logger/audit.db'
-
-# Sentinel object: penanda khusus untuk memberi sinyal shutdown ke subscriber (graceful shutdown)
+DB_PATH = 'data/audit.db'
 
 _SENTINEL = object()
 
@@ -15,14 +13,14 @@ _SENTINEL = object()
 class AuditLogger:
 
     def __init__(self, db_path=DB_PATH):
-        self._conn = sqlite3.connect(db_path, check_same_thread=False) # Membuka koneksi ke SQLite
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._lock = threading.Lock()
         self._subscribers = []
         self._sub_lock = threading.Lock()
         self._init_db()
 
     def _init_db(self):
-        with self._lock: 
+        with self._lock:
             self._conn.execute('''
                 CREATE TABLE IF NOT EXISTS audit (
                     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,8 +34,6 @@ class AuditLogger:
                 )
             ''')
             self._conn.commit()
-
-    # Menyimpan satu record perubahan flag ke database
 
     def log_change(self, record):
         with self._lock:
@@ -61,15 +57,11 @@ class AuditLogger:
                  record.flag_name, record.old_value, record.new_value, record.changed_by)
         self._notify_subscribers(record)
 
-    # Mengirim record ke semua subscriber melalui queue
-
     def _notify_subscribers(self, record):
         with self._sub_lock:
             subscribers = list(self._subscribers)
         for q in subscribers:
             q.put(record)
-
-    # Menyusun query untuk mengambil riwayat perubahan
 
     def get_history(self, flag_name='', limit=0):
         query = 'SELECT flag_name, old_value, new_value, changed_by, changed_at, reason, policy_result FROM audit'
@@ -102,21 +94,15 @@ class AuditLogger:
             for row in rows
         ]
 
-    # Menambahkan subscriber baru untuk streaming
-
     def add_subscriber(self, q):
         with self._sub_lock:
             self._subscribers.append(q)
         log.info("StreamHistory subscriber added (total: %d)", len(self._subscribers))
 
-    # Menghapus subscriber saat client disconnect / server shutdown
-
     def remove_subscriber(self, q):
         with self._sub_lock:
             self._subscribers.remove(q)
         log.info("StreamHistory subscriber removed (total: %d)", len(self._subscribers))
-
-    # Mengirim sinyal sentinel ke semua subscriber untuk menghentikan stream (Graceful Shutdown)
 
     def shutdown(self):
         with self._sub_lock:

@@ -1,3 +1,4 @@
+import os
 import logging
 from concurrent import futures
 
@@ -8,25 +9,42 @@ from generated import killswitch_pb2_grpc
 
 from .engine import validate_change
 
-# Setup Logging agar Server Bisa Log Aktivitas Service
+try:
+    import tomli
+except ModuleNotFoundError:
+    import tomllib as tomli
+
+def _load_config():
+    config_path = os.environ.get('GRUS_CONFIG', '')
+    if config_path and os.path.isfile(config_path):
+        with open(config_path, 'rb') as f:
+            return tomli.load(f)
+    return {}
+
+_cfg = _load_config()
+
+PORT = _cfg.get('services', {}).get('policy_evaluator', {}).get('port', 50052)
+
+_log_cfg = _cfg.get('logging', {})
+_log_dir = _log_cfg.get('directory', 'logs')
+os.makedirs(_log_dir, exist_ok=True)
+
+_handlers = [logging.StreamHandler()]
+if _cfg:
+    _handlers.append(logging.FileHandler(os.path.join(_log_dir, 'policy_evaluator.log')))
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, _log_cfg.get('level', 'INFO')),
     format='%(asctime)s [policy_evaluator] %(levelname)s %(message)s',
+    handlers=_handlers,
 )
 log = logging.getLogger(__name__)
-
-PORT = 50052
 
 
 class PolicyEvaluatorServicer(killswitch_pb2_grpc.PolicyEvaluatorServicer):
 
-    # Metode RPC untuk memvalidasi perubahan flag berdasarkan policy yang berlaku
-
     def ValidateChange(self, request, context):
         proposed = request.proposed_change
-
-        # Logging request yang masuk
 
         log.info(
             "ValidateChange: flag='%s' enabled=%s changed_by='%s' context_flags=%d",
@@ -35,8 +53,6 @@ class PolicyEvaluatorServicer(killswitch_pb2_grpc.PolicyEvaluatorServicer):
             request.changed_by,
             len(request.context_flags),
         )
-
-        # Memanggil engine policy untuk menentukan apakah perubahan diizinkan
 
         approved, denial_reason = validate_change(
             proposed_flag=proposed,
@@ -48,14 +64,10 @@ class PolicyEvaluatorServicer(killswitch_pb2_grpc.PolicyEvaluatorServicer):
         else:
             log.info("Decision: DENIED flag='%s' reason='%s'", proposed.name, denial_reason)
 
-        # Mengembalikan hasil evaluasi ke client dalam bentuk response protobuf
-
         return killswitch_pb2.PolicyResponse(
             approved=approved,
             denial_reason=denial_reason,
         )
-
-# Inisialisasi dan menjalankan gRPC server Policy Evaluator
 
 def serve():
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))

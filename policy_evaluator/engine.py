@@ -1,34 +1,36 @@
 import datetime
+import os
 
-# Rule 1: Flag yang tidak bisa dinonaktifkan (enabled=False)
+try:
+    import tomli
+except ModuleNotFoundError:
+    import tomllib as tomli
 
-PROTECTED_FLAGS = {
-    "payment-fallback",
-}
+_rules_path = os.environ.get('GRUS_POLICY_CONFIG', '')
+_rules = {}
+if _rules_path and os.path.isfile(_rules_path):
+    with open(_rules_path, 'rb') as _f:
+        _rules = tomli.load(_f)
 
-# Rule 2: Pasangan flag yang saling eksklusif (mutex): tidak boleh keduanya enabled=True secara bersamaan
+PROTECTED_FLAGS = set(_rules.get('protected_flags', ['payment-fallback']))
 
 MUTEX_PAIRS = [
-    ("cache-only-mode", "disable-cache-refresh"),
+    tuple(group['flags'])
+    for group in _rules.get('mutual_exclusion', [{'flags': ['cache-only-mode', 'disable-cache-refresh']}])
 ]
 
-# Rule 3: Perubahan flag tidak diizinkan selama jendela pemeliharaan
-
-_TZ_JAKARTA = datetime.timezone(datetime.timedelta(hours=7))
-MAINTENANCE_WINDOW_LOCAL = (2, 4)  # 02:00–04:00 UTC+7 (Asia/Jakarta)
+_mw = _rules.get('maintenance_window', {})
+_TZ_JAKARTA = datetime.timezone(datetime.timedelta(hours=_mw.get('timezone_offset', 7)))
+MAINTENANCE_WINDOW_LOCAL = (_mw.get('start_hour', 2), _mw.get('end_hour', 4))
 
 
 def validate_change(proposed_flag, context_flags):
     current_state = {f.name: f.enabled for f in context_flags}
 
-    # Jika flag termasuk protected dan ingin dinonaktifkan: Reject
-
     if proposed_flag.name in PROTECTED_FLAGS and not proposed_flag.enabled:
         return False, (
             f"'{proposed_flag.name}' is a protected flag and cannot be disabled."
         )
-
-    # Cek apakah ada konflik dengan flag lain yang mutually exclusive
 
     for flag_a, flag_b in MUTEX_PAIRS:
         if proposed_flag.name == flag_a and proposed_flag.enabled:
@@ -44,8 +46,6 @@ def validate_change(proposed_flag, context_flags):
                     f"'{flag_a}' is already enabled."
                 )
 
-    # Cek apakah saat ini berada di dalam jendela pemeliharaan, jika iya: Reject
-
     current_hour = datetime.datetime.now(_TZ_JAKARTA).hour
     start, end = MAINTENANCE_WINDOW_LOCAL
     if start <= current_hour < end:
@@ -53,7 +53,5 @@ def validate_change(proposed_flag, context_flags):
             f"Flag changes are blocked during the maintenance window "
             f"({start:02d}:00-{end:02d}:00 UTC+7). Current hour: {current_hour:02d} (UTC+7)."
         )
-
-    # Perubahan flag diizinkan jika lolos semua rule
 
     return True, ""

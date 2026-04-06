@@ -1,3 +1,4 @@
+import os
 import logging
 from concurrent import futures
 
@@ -8,32 +9,54 @@ from generated import killswitch_pb2_grpc
 
 from .store import FlagStore
 
-# Setup Logging agar Server Bisa Log Aktivitas Service
+try:
+    import tomli
+except ModuleNotFoundError:
+    import tomllib as tomli
+
+def _load_config():
+    config_path = os.environ.get('GRUS_CONFIG', '')
+    if config_path and os.path.isfile(config_path):
+        with open(config_path, 'rb') as f:
+            return tomli.load(f)
+    return {}
+
+_cfg = _load_config()
+
+PORT = _cfg.get('services', {}).get('flag_store', {}).get('port', 50051)
+DB_PATH = _cfg.get('services', {}).get('flag_store', {}).get('db_path', 'data/flags.db')
+
+_pe = _cfg.get('services', {}).get('policy_evaluator', {})
+_bc = _cfg.get('services', {}).get('broadcaster', {})
+_al = _cfg.get('services', {}).get('audit_logger', {})
+
+POLICY_EVALUATOR_ADDR = f"{_pe.get('host', 'localhost')}:{_pe.get('port', 50052)}"
+BROADCASTER_ADDR = f"{_bc.get('host', 'localhost')}:{_bc.get('port', 50053)}"
+AUDIT_LOGGER_ADDR = f"{_al.get('host', 'localhost')}:{_al.get('port', 50054)}"
+
+_log_cfg = _cfg.get('logging', {})
+_log_dir = _log_cfg.get('directory', 'logs')
+os.makedirs(_log_dir, exist_ok=True)
+
+_handlers = [logging.StreamHandler()]
+if _cfg:
+    _handlers.append(logging.FileHandler(os.path.join(_log_dir, 'flag_store.log')))
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, _log_cfg.get('level', 'INFO')),
     format='%(asctime)s [flag_store] %(levelname)s %(message)s',
+    handlers=_handlers,
 )
 log = logging.getLogger(__name__)
-
-PORT = 50051
-
-# Alamat Port Service Lain yang Akan Digunakan oleh Flag Store
-
-POLICY_EVALUATOR_ADDR  = 'localhost:50052'
-BROADCASTER_ADDR       = 'localhost:50053'
-AUDIT_LOGGER_ADDR      = 'localhost:50054'
 
 
 class FlagStoreServicer(killswitch_pb2_grpc.FlagStoreServicer):
 
     def __init__(self, store, policy_stub, broadcaster_stub, audit_stub):
-        self._store           = store
-        self._policy_stub     = policy_stub
+        self._store = store
+        self._policy_stub = policy_stub
         self._broadcaster_stub = broadcaster_stub
-        self._audit_stub      = audit_stub
-
-    # Metode RPC untuk Mengubah Status Flag (enable/disable) dengan Validasi Policy, Logging Audit, dan Broadcast ke Subscriber
+        self._audit_stub = audit_stub
 
     def SetFlag(self, request, context):
         log.info("SetFlag: flag='%s' enabled=%s by='%s'",
@@ -48,8 +71,6 @@ class FlagStoreServicer(killswitch_pb2_grpc.FlagStoreServicer):
             log.info("SetFlag result: success=False message='%s'", message)
         return killswitch_pb2.FlagChangeResponse(success=success, message=message)
 
-    # Metode RPC untuk Mengambil Detail Status Satu Flag Tertentu
-
     def GetFlag(self, request, context):
         row = self._store.get_flag(request.name)
         if row is None:
@@ -60,8 +81,6 @@ class FlagStoreServicer(killswitch_pb2_grpc.FlagStoreServicer):
             description=row['description'],
         )
 
-    # Metode RPC untuk Mengambil Daftar Semua Flag yang Tersedia beserta Statusnya
-
     def ListFlags(self, request, context):
         rows = self._store.list_flags()
         flags = [
@@ -71,18 +90,17 @@ class FlagStoreServicer(killswitch_pb2_grpc.FlagStoreServicer):
         return killswitch_pb2.FlagList(flags=flags)
 
 
-# Inisialisasi dan menjalankan gRPC server Flag Store, serta menghubungkan ke service lain (Policy Evaluator, Broadcaster, Audit Logger) melalui gRPC stub
-
 def serve():
-    store = FlagStore()
+    os.makedirs(os.path.dirname(DB_PATH) or '.', exist_ok=True)
+    store = FlagStore(db_path=DB_PATH)
 
-    policy_channel      = grpc.insecure_channel(POLICY_EVALUATOR_ADDR)
+    policy_channel = grpc.insecure_channel(POLICY_EVALUATOR_ADDR)
     broadcaster_channel = grpc.insecure_channel(BROADCASTER_ADDR)
-    audit_channel       = grpc.insecure_channel(AUDIT_LOGGER_ADDR)
+    audit_channel = grpc.insecure_channel(AUDIT_LOGGER_ADDR)
 
-    policy_stub      = killswitch_pb2_grpc.PolicyEvaluatorStub(policy_channel)
+    policy_stub = killswitch_pb2_grpc.PolicyEvaluatorStub(policy_channel)
     broadcaster_stub = killswitch_pb2_grpc.BroadcasterStub(broadcaster_channel)
-    audit_stub       = killswitch_pb2_grpc.AuditLoggerStub(audit_channel)
+    audit_stub = killswitch_pb2_grpc.AuditLoggerStub(audit_channel)
 
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     killswitch_pb2_grpc.add_FlagStoreServicer_to_server(

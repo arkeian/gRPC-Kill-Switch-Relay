@@ -1,0 +1,9 @@
+protected_flags = ["payment-fallback"]
+
+[[mutual_exclusion]]
+flags = ["cache-only-mode", "disable-cache-refresh"]
+
+[maintenance_window]
+start_hour = 2
+end_hour = 4
+timezone_offset = 7
