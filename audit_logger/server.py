@@ -1,23 +1,13 @@
-import sys
-import os
 import logging
 import queue
 from concurrent import futures
 
 import grpc
 
-# Menambahkan Folder generated/ ke Python path supaya bisa import hasil protoc
+from generated import killswitch_pb2
+from generated import killswitch_pb2_grpc
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'generated'))
-
-# Mengimpor File protoc yang Dihasilkan
-
-import killswitch_pb2
-import killswitch_pb2_grpc
-
-# Sentinel object: Penanda khusus untuk menghentikan streaming (Graceful Shutdown)
-
-from logger import AuditLogger, _SENTINEL
+from .logger import AuditLogger, _SENTINEL
 
 # Setup Logging agar Server Bisa Log Aktivitas Service
 

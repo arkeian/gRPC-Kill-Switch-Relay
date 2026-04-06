@@ -8,21 +8,18 @@ import sys
 import threading
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'generated'))
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'policy_evaluator'))
-
 import grpc
-import killswitch_pb2
-import killswitch_pb2_grpc
-from engine import MAINTENANCE_WINDOW_LOCAL
+from generated import killswitch_pb2
+from generated import killswitch_pb2_grpc
+from policy_evaluator.engine import MAINTENANCE_WINDOW_LOCAL
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 SERVICES = [
-    ('Policy Evaluator',  'policy_evaluator/server.py',  50052),
-    ('Audit Logger',      'audit_logger/server.py',      50054),
-    ('Broadcaster',       'broadcaster/server.py',       50053),
-    ('Flag Store',        'flag_store/server.py',        50051),
+    ('Policy Evaluator',  'policy_evaluator.server',  50052),
+    ('Audit Logger',      'audit_logger.server',      50054),
+    ('Broadcaster',       'broadcaster.server',       50053),
+    ('Flag Store',        'flag_store.server',        50051),
 ]
 
 FLAG_STORE_ADDR  = 'localhost:50051'
@@ -41,8 +38,9 @@ def start_services():
         log_path = os.path.join(log_dir, f'{port}.log')
         with open(log_path, 'w') as log_fh:
             proc = subprocess.Popen(
-                [sys.executable, script],
+                [sys.executable, '-m', script],
                 cwd=REPO_ROOT,
+                env={**os.environ, 'PYTHONPATH': REPO_ROOT},
                 stdout=log_fh,
                 stderr=subprocess.STDOUT,
             )

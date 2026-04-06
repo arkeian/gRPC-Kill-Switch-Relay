@@ -3,7 +3,7 @@ import sqlite3
 import threading
 import time
 
-import killswitch_pb2
+from generated import killswitch_pb2
 
 # Setup Logging agar Store Bisa Log Aktivitas
 

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+export PYTHONPATH="$REPO_ROOT"
 LOG_DIR="$REPO_ROOT/logs"
 PID_FILE="$REPO_ROOT/run_all.pids"
 
@@ -41,7 +42,7 @@ start_service() {
     local port="$3"
     local log_file="$LOG_DIR/${port}-${name// /_}.log"
 
-    python "$REPO_ROOT/$script" > "$log_file" 2>&1 &
+    python -m "$script" > "$log_file" 2>&1 &
     local pid=$!
     PIDS+=("$pid")
     echo "  [$pid]  $name  →  $log_file"
@@ -92,16 +93,16 @@ rm -f "$PID_FILE"
 echo "==> Starting services..."
 
 # Start in dependency order: Flag Store depends on all three below
-start_service "Policy Evaluator" "policy_evaluator/server.py" 50052
+start_service "Policy Evaluator" "policy_evaluator.server" 50052
 wait_for_port  "Policy Evaluator" 50052
 
-start_service "Audit Logger"     "audit_logger/server.py"    50054
+start_service "Audit Logger"     "audit_logger.server"    50054
 wait_for_port  "Audit Logger"     50054
 
-start_service "Broadcaster"      "broadcaster/server.py"     50053
+start_service "Broadcaster"      "broadcaster.server"     50053
 wait_for_port  "Broadcaster"      50053
 
-start_service "Flag Store"       "flag_store/server.py"      50051
+start_service "Flag Store"       "flag_store.server"      50051
 wait_for_port  "Flag Store"       50051
 
 echo ""

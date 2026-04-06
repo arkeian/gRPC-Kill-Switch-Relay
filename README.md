@@ -197,9 +197,9 @@ python
 
 Paste this setup block once per session:
 ```python
-import sys, time, threading
-sys.path.insert(0, 'generated')
-import grpc, killswitch_pb2, killswitch_pb2_grpc
+import time, threading
+import grpc
+from generated import killswitch_pb2, killswitch_pb2_grpc
 
 fs  = killswitch_pb2_grpc.FlagStoreStub(grpc.insecure_channel('localhost:50051'))
 pe  = killswitch_pb2_grpc.PolicyEvaluatorStub(grpc.insecure_channel('localhost:50052'))

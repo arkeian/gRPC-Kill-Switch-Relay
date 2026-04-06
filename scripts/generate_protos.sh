@@ -15,6 +15,9 @@ python -m grpc_tools.protoc \
     --grpc_python_out="$OUT_DIR" \
     "$PROTO_DIR/killswitch.proto"
 
+echo "==> Patching generated imports for package-style usage..."
+sed -i 's/^import killswitch_pb2 as killswitch__pb2$/from generated import killswitch_pb2 as killswitch__pb2/' "$OUT_DIR/killswitch_pb2_grpc.py"
+
 echo "==> Creating __init__.py in generated/..."
 touch "$OUT_DIR/__init__.py"
 

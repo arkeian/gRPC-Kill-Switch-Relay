@@ -1,20 +1,12 @@
-import sys
-import os
 import logging
 from concurrent import futures
 
 import grpc
 
-# Menambahkan Folder generated/ ke Python path supaya bisa import hasil protoc
+from generated import killswitch_pb2
+from generated import killswitch_pb2_grpc
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'generated'))
-
-# Mengimpor File protoc yang Dihasilkan
-
-import killswitch_pb2
-import killswitch_pb2_grpc
-
-from engine import validate_change
+from .engine import validate_change
 
 # Setup Logging agar Server Bisa Log Aktivitas Service
 
