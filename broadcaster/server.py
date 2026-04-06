@@ -6,11 +6,20 @@ from concurrent import futures
 
 import grpc
 
+# Menambahkan Folder generated/ ke Python path supaya bisa import hasil protoc
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'generated'))
+
+# Mengimpor File protoc yang Dihasilkan
+
 import killswitch_pb2
 import killswitch_pb2_grpc
 
+# Sentinel object: Penanda khusus untuk menghentikan streaming (Graceful Shutdown)
+
 from subscriber_manager import SubscriberManager, _SENTINEL
+
+# Setup Logging agar Server Bisa Log Aktivitas Service
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,25 +35,30 @@ class BroadcasterServicer(killswitch_pb2_grpc.BroadcasterServicer):
     def __init__(self, manager):
         self._manager = manager
 
+    # Metode RPC untuk Mengirim Notifikasi Perubahan Flag ke Subscriber
+
     def NotifyChange(self, request, context):
         self._manager.notify_all(request)
         return killswitch_pb2.Empty()
 
+    # Server-streaming RPC: Client subscribe dan Server mengirim update flag secara kontinu sampai client disconnect atau server shutdown
+
     def SubscribeFlags(self, request, context):
-        q = queue.Queue()
+        q = queue.Queue() # Setiap subscriber mendapat queue sendiri untuk menerima update
         self._manager.add(q)
         try:
             while context.is_active():
                 try:
-                    update = q.get(timeout=1.0)
+                    update = q.get(timeout=1.0) # Ambil update dengan timeout agar tetap bisa cek status koneksi
                 except queue.Empty:
                     continue
-                if update is _SENTINEL:
+                if update is _SENTINEL: # Jika menerima sentinel: Hentikan stream (shutdown signal)
                     break
                 yield update
-        finally:
+        finally:    
             self._manager.remove(q)
 
+# Inisialisasi dan menjalankan gRPC server Broadcaster
 
 def serve():
     manager = SubscriberManager()

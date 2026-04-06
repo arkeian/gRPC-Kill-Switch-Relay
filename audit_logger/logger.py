@@ -7,20 +7,22 @@ log = logging.getLogger(__name__)
 
 DB_PATH = 'audit_logger/audit.db'
 
-_SENTINEL = object()  # pushed to subscriber queues on server shutdown
+# Sentinel object: penanda khusus untuk memberi sinyal shutdown ke subscriber (graceful shutdown)
+
+_SENTINEL = object()
 
 
 class AuditLogger:
 
     def __init__(self, db_path=DB_PATH):
-        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False) # Membuka koneksi ke SQLite
         self._lock = threading.Lock()
-        self._subscribers = []          # list[queue.Queue]
+        self._subscribers = []
         self._sub_lock = threading.Lock()
         self._init_db()
 
     def _init_db(self):
-        with self._lock:
+        with self._lock: 
             self._conn.execute('''
                 CREATE TABLE IF NOT EXISTS audit (
                     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -35,10 +37,9 @@ class AuditLogger:
             ''')
             self._conn.commit()
 
-    # ── Write path ────────────────────────────────────────────────────────────
+    # Menyimpan satu record perubahan flag ke database
 
     def log_change(self, record):
-        """Persist an AuditRecord proto and push it to all live subscribers."""
         with self._lock:
             self._conn.execute(
                 '''INSERT INTO audit
@@ -60,17 +61,17 @@ class AuditLogger:
                  record.flag_name, record.old_value, record.new_value, record.changed_by)
         self._notify_subscribers(record)
 
+    # Mengirim record ke semua subscriber melalui queue
+
     def _notify_subscribers(self, record):
         with self._sub_lock:
             subscribers = list(self._subscribers)
         for q in subscribers:
             q.put(record)
 
-    # ── Read path ─────────────────────────────────────────────────────────────
+    # Menyusun query untuk mengambil riwayat perubahan
 
     def get_history(self, flag_name='', limit=0):
-        """Return a list of row dicts. Filters by flag_name if non-empty.
-        Returns at most `limit` rows if limit > 0, otherwise all rows."""
         query = 'SELECT flag_name, old_value, new_value, changed_by, changed_at, reason, policy_result FROM audit'
         params = []
 
@@ -101,20 +102,23 @@ class AuditLogger:
             for row in rows
         ]
 
-    # ── Subscriber management ─────────────────────────────────────────────────
+    # Menambahkan subscriber baru untuk streaming
 
     def add_subscriber(self, q):
         with self._sub_lock:
             self._subscribers.append(q)
         log.info("StreamHistory subscriber added (total: %d)", len(self._subscribers))
 
+    # Menghapus subscriber saat client disconnect / server shutdown
+
     def remove_subscriber(self, q):
         with self._sub_lock:
             self._subscribers.remove(q)
         log.info("StreamHistory subscriber removed (total: %d)", len(self._subscribers))
 
+    # Mengirim sinyal sentinel ke semua subscriber untuk menghentikan stream (Graceful Shutdown)
+
     def shutdown(self):
-        """Signal all live StreamHistory streams to exit cleanly."""
         with self._sub_lock:
             for q in self._subscribers:
                 q.put(_SENTINEL)

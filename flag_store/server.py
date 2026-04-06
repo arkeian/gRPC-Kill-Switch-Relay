@@ -5,11 +5,18 @@ from concurrent import futures
 
 import grpc
 
+# Menambahkan Folder generated/ ke Python path supaya bisa import hasil protoc
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'generated'))
+
+# Mengimpor File protoc yang Dihasilkan
+
 import killswitch_pb2
 import killswitch_pb2_grpc
 
 from store import FlagStore
+
+# Setup Logging agar Server Bisa Log Aktivitas Service
 
 logging.basicConfig(
     level=logging.INFO,
@@ -18,6 +25,9 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 PORT = 50051
+
+# Alamat Port Service Lain yang Akan Digunakan oleh Flag Store
+
 POLICY_EVALUATOR_ADDR  = 'localhost:50052'
 BROADCASTER_ADDR       = 'localhost:50053'
 AUDIT_LOGGER_ADDR      = 'localhost:50054'
@@ -30,6 +40,8 @@ class FlagStoreServicer(killswitch_pb2_grpc.FlagStoreServicer):
         self._policy_stub     = policy_stub
         self._broadcaster_stub = broadcaster_stub
         self._audit_stub      = audit_stub
+
+    # Metode RPC untuk Mengubah Status Flag (enable/disable) dengan Validasi Policy, Logging Audit, dan Broadcast ke Subscriber
 
     def SetFlag(self, request, context):
         log.info("SetFlag: flag='%s' enabled=%s by='%s'",
@@ -44,6 +56,8 @@ class FlagStoreServicer(killswitch_pb2_grpc.FlagStoreServicer):
             log.info("SetFlag result: success=False message='%s'", message)
         return killswitch_pb2.FlagChangeResponse(success=success, message=message)
 
+    # Metode RPC untuk Mengambil Detail Status Satu Flag Tertentu
+
     def GetFlag(self, request, context):
         row = self._store.get_flag(request.name)
         if row is None:
@@ -54,6 +68,8 @@ class FlagStoreServicer(killswitch_pb2_grpc.FlagStoreServicer):
             description=row['description'],
         )
 
+    # Metode RPC untuk Mengambil Daftar Semua Flag yang Tersedia beserta Statusnya
+
     def ListFlags(self, request, context):
         rows = self._store.list_flags()
         flags = [
@@ -62,6 +78,8 @@ class FlagStoreServicer(killswitch_pb2_grpc.FlagStoreServicer):
         ]
         return killswitch_pb2.FlagList(flags=flags)
 
+
+# Inisialisasi dan menjalankan gRPC server Flag Store, serta menghubungkan ke service lain (Policy Evaluator, Broadcaster, Audit Logger) melalui gRPC stub
 
 def serve():
     store = FlagStore()

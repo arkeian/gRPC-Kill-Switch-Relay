@@ -1,15 +1,4 @@
 #!/usr/bin/env python3
-"""
-Integration tests for the Kill Switch Relay system.
-
-Starts all 4 services, runs end-to-end scenarios, then shuts them down.
-Must be run from the repository root:
-
-    python tests/integration_test.py
-
-NOTE: The Policy Evaluator blocks all changes during 02:00-04:00 UTC.
-This test will abort early if the maintenance window is active.
-"""
 
 import datetime
 import os
@@ -25,11 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'policy_evaluat
 import grpc
 import killswitch_pb2
 import killswitch_pb2_grpc
-from engine import MAINTENANCE_WINDOW_UTC
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Config
-# ─────────────────────────────────────────────────────────────────────────────
+from engine import MAINTENANCE_WINDOW_LOCAL
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -44,12 +29,8 @@ FLAG_STORE_ADDR  = 'localhost:50051'
 BROADCASTER_ADDR = 'localhost:50053'
 AUDIT_ADDR       = 'localhost:50054'
 
-PASS = '\033[92mPASS\033[0m'
-FAIL = '\033[91mFAIL\033[0m'
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Service lifecycle
-# ─────────────────────────────────────────────────────────────────────────────
+PASS = 'PASS'
+FAIL = 'FAIL'
 
 def start_services():
     procs = []
@@ -70,7 +51,6 @@ def start_services():
 
     return procs
 
-
 def stop_services(procs):
     print('\nShutting down services...')
     for name, proc, port, _ in procs:
@@ -84,7 +64,6 @@ def stop_services(procs):
 
 
 def wait_for_service(addr, name, timeout=15):
-    """Block until the gRPC channel connects or timeout expires."""
     channel = grpc.insecure_channel(addr)
     future = grpc.channel_ready_future(channel)
     try:
@@ -102,11 +81,6 @@ def clean_db_files():
         if os.path.exists(full):
             os.remove(full)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────────────
-
 def set_flag(stub, name, enabled, by='integration-test', reason='', desc=''):
     return stub.SetFlag(killswitch_pb2.FlagChangeRequest(
         flag=killswitch_pb2.Flag(name=name, enabled=enabled, description=desc),
@@ -122,14 +96,8 @@ def assert_eq(label, actual, expected):
         print(f'  {FAIL}  {label}: expected {expected!r}, got {actual!r}')
         sys.exit(1)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Scenarios
-# ─────────────────────────────────────────────────────────────────────────────
-
 def scenario_1_set_and_propagate(fs_stub, bc_stub):
-    """Set a flag and verify the Broadcaster receives and delivers the update."""
-    print('\n── Scenario 1: SetFlag propagates to subscriber ─────────────────────')
+    print('\nScenario 1: SetFlag propagates to subscriber')
 
     received = queue.Queue()
 
@@ -139,7 +107,7 @@ def scenario_1_set_and_propagate(fs_stub, bc_stub):
 
     t = threading.Thread(target=subscribe, daemon=True)
     t.start()
-    time.sleep(0.3)  # let the stream establish before sending
+    time.sleep(0.3)
 
     resp = set_flag(fs_stub, 'payment-fallback', True,
                     reason='scenario-1', desc='payment circuit breaker')
@@ -156,10 +124,8 @@ def scenario_1_set_and_propagate(fs_stub, bc_stub):
 
 
 def scenario_2_policy_denial(fs_stub):
-    """Attempt to disable a protected flag — must be denied."""
-    print('\n── Scenario 2: Policy denial (protected flag) ───────────────────────')
+    print('\nScenario 2: Policy denial (protected flag)')
 
-    # payment-fallback must already exist (created in scenario 1)
     resp = set_flag(fs_stub, 'payment-fallback', False,
                     reason='scenario-2-should-fail')
     assert_eq('SetFlag success',  resp.success, False)
@@ -169,14 +135,13 @@ def scenario_2_policy_denial(fs_stub):
 
 
 def scenario_3_audit_history(fs_stub, audit_stub):
-    """Set a flag and verify the audit record is queryable."""
-    print('\n── Scenario 3: Audit history persisted ──────────────────────────────')
+    print('\nScenario 3: Audit history persisted')
 
     resp = set_flag(fs_stub, 'disable-recommendations', True,
                     by='sre-oncall', reason='reducing load', desc='rec engine kill switch')
     assert_eq('SetFlag success', resp.success, True)
 
-    time.sleep(0.2)  # give the non-fatal LogChange call time to complete
+    time.sleep(0.2)
 
     history = audit_stub.GetHistory(
         killswitch_pb2.AuditQuery(flag_name='disable-recommendations', limit=5)
@@ -191,8 +156,7 @@ def scenario_3_audit_history(fs_stub, audit_stub):
 
 
 def scenario_4_multi_flag_stream(fs_stub, bc_stub):
-    """Open a stream, change multiple flags, verify all updates arrive in order."""
-    print('\n── Scenario 4: Multi-flag stream delivery ───────────────────────────')
+    print('\nScenario 4: Multi-flag stream delivery')
 
     FLAGS_TO_SET = [
         ('cache-only-mode',         True,  'ENABLED'),
@@ -228,16 +192,10 @@ def scenario_4_multi_flag_stream(fs_stub, bc_stub):
         assert_eq(f'update[{i}] flag enabled', collected[i].flag.enabled, enabled)
         assert_eq(f'update[{i}] change_type',  collected[i].change_type,  change_type)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Main
-# ─────────────────────────────────────────────────────────────────────────────
-
 def main():
-    # Guard: maintenance window blocks all SetFlag calls
     _tz_jakarta = datetime.timezone(datetime.timedelta(hours=7))
     current_hour = datetime.datetime.now(_tz_jakarta).hour
-    mw_start, mw_end = MAINTENANCE_WINDOW_UTC
+    mw_start, mw_end = MAINTENANCE_WINDOW_LOCAL
     if mw_start <= current_hour < mw_end:
         print(
             f'ERROR: Current hour is {current_hour:02d}:xx (UTC+7), which falls within the '
@@ -248,7 +206,7 @@ def main():
         )
         sys.exit(1)
 
-    print('=== Kill Switch Relay — Integration Tests ===\n')
+    print('Kill Switch Relay - Integration Tests\n')
 
     clean_db_files()
 
@@ -270,7 +228,7 @@ def main():
         scenario_3_audit_history(fs_stub, audit_stub)
         scenario_4_multi_flag_stream(fs_stub, bc_stub)
 
-        print('\n\033[92m=== All scenarios passed ===\033[0m')
+        print('\nSUCCESS: All scenarios passed!')
 
     finally:
         stop_services(procs)

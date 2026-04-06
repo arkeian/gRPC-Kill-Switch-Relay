@@ -2,10 +2,6 @@ syntax = "proto3";
 
 package killswitch;
 
-// ─────────────────────────────────────────────
-// Messages
-// ─────────────────────────────────────────────
-
 message Flag {
     string name        = 1;
     bool   enabled     = 2;
@@ -27,7 +23,7 @@ message PolicyRequest {
     Flag            current_flag    = 1;
     Flag            proposed_change = 2;
     string          changed_by      = 3;
-    repeated Flag   context_flags   = 4;  // current state of all flags relevant to mutex evaluation
+    repeated Flag   context_flags   = 4;  // untuk evaluasi mutex
 }
 
 message PolicyResponse {
@@ -71,36 +67,20 @@ message FlagList {
 
 message Empty {}
 
-// ─────────────────────────────────────────────
-// Service 1: Flag Store  (port 50051)
-// ─────────────────────────────────────────────
-
 service FlagStore {
     rpc SetFlag   (FlagChangeRequest) returns (FlagChangeResponse);
     rpc GetFlag   (FlagQuery)         returns (Flag);
     rpc ListFlags (Empty)             returns (FlagList);
 }
 
-// ─────────────────────────────────────────────
-// Service 2: Policy Evaluator  (port 50052)
-// ─────────────────────────────────────────────
-
 service PolicyEvaluator {
     rpc ValidateChange (PolicyRequest) returns (PolicyResponse);
 }
-
-// ─────────────────────────────────────────────
-// Service 3: Stream Broadcaster  (port 50053)
-// ─────────────────────────────────────────────
 
 service Broadcaster {
     rpc SubscribeFlags (Empty)      returns (stream FlagUpdate);
     rpc NotifyChange   (FlagUpdate) returns (Empty);
 }
-
-// ─────────────────────────────────────────────
-// Service 4: Audit Logger  (port 50054)
-// ─────────────────────────────────────────────
 
 service AuditLogger {
     rpc LogChange     (AuditRecord)  returns (Empty);

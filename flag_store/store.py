@@ -5,6 +5,8 @@ import time
 
 import killswitch_pb2
 
+# Setup Logging agar Store Bisa Log Aktivitas
+
 log = logging.getLogger(__name__)
 
 DB_PATH = 'flag_store/flags.db'
@@ -31,10 +33,9 @@ class FlagStore:
             ''')
             self._conn.commit()
 
-    # ── Internal helpers ──────────────────────────────────────────────────────
+    # Helper Methods
 
     def _get_row(self, name):
-        """Return a single row dict or None if the flag doesn't exist."""
         cursor = self._conn.execute(
             'SELECT name, enabled, description, updated_at, updated_by FROM flags WHERE name = ?',
             (name,),
@@ -52,10 +53,9 @@ class FlagStore:
         return [{'name': r[0], 'enabled': bool(r[1]), 'description': r[2]}
                 for r in cursor.fetchall()]
 
-    # ── RPC implementations ───────────────────────────────────────────────────
+    # Implementasi RPC
 
     def set_flag(self, request, policy_stub, broadcaster_stub, audit_stub):
-        """Full SetFlag flow. Returns (success: bool, message: str)."""
         proposed = request.flag
         changed_by = request.changed_by
         reason = request.reason
@@ -67,7 +67,8 @@ class FlagStore:
 
         old_enabled = current_row['enabled'] if current_row else False
 
-        # ── Step 1: Validate ──────────────────────────────────────────────────
+        # Validasi Flag Baru dengan Policy Evaluator
+
         current_flag_proto = killswitch_pb2.Flag(
             name=proposed.name,
             enabled=old_enabled,
@@ -94,7 +95,8 @@ class FlagStore:
             log.info("SetFlag denied: flag='%s' reason='%s'", proposed.name, policy_resp.denial_reason)
             return False, policy_resp.denial_reason
 
-        # ── Step 2: Persist ───────────────────────────────────────────────────
+        # Persist Perubahan ke DB
+
         with self._lock:
             self._conn.execute(
                 '''INSERT INTO flags (name, enabled, description, updated_at, updated_by)
@@ -109,7 +111,8 @@ class FlagStore:
             self._conn.commit()
         log.info("Persisted: flag='%s' enabled=%s by='%s'", proposed.name, proposed.enabled, changed_by)
 
-        # ── Step 3: Notify broadcaster (non-fatal) ────────────────────────────
+        # Broadcast Perubahan Flag ke Subscriber
+        
         flag_update = killswitch_pb2.FlagUpdate(
             flag=proposed,
             changed_by=changed_by,
@@ -121,7 +124,8 @@ class FlagStore:
         except Exception as e:
             log.warning("Broadcaster notification failed for flag='%s': %s", proposed.name, e)
 
-        # ── Step 4: Audit log (non-fatal) ─────────────────────────────────────
+        # Audit Log Perubahan
+
         audit_record = killswitch_pb2.AuditRecord(
             flag_name=proposed.name,
             old_value=old_enabled,
@@ -138,12 +142,14 @@ class FlagStore:
 
         return True, "ok"
 
+    # RPC untuk Mengambil Detail Status Satu Flag Tertentu
+
     def get_flag(self, name):
-        """Return a row dict or None if not found."""
         with self._lock:
             return self._get_row(name)
 
+    # RPC untuk Mengambil Daftar Semua Flag yang Tersedia beserta Statusnya
+
     def list_flags(self):
-        """Return all flag rows."""
         with self._lock:
             return self._list_rows()

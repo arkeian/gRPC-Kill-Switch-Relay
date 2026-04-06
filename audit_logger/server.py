@@ -6,11 +6,20 @@ from concurrent import futures
 
 import grpc
 
+# Menambahkan Folder generated/ ke Python path supaya bisa import hasil protoc
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'generated'))
+
+# Mengimpor File protoc yang Dihasilkan
+
 import killswitch_pb2
 import killswitch_pb2_grpc
 
+# Sentinel object: Penanda khusus untuk menghentikan streaming (Graceful Shutdown)
+
 from logger import AuditLogger, _SENTINEL
+
+# Setup Logging agar Server Bisa Log Aktivitas Service
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,9 +35,13 @@ class AuditLoggerServicer(killswitch_pb2_grpc.AuditLoggerServicer):
     def __init__(self, audit_logger):
         self._logger = audit_logger
 
+    # Metode RPC untuk Mencatat satu Perubahan Flag ke Database
+
     def LogChange(self, request, context):
         self._logger.log_change(request)
         return killswitch_pb2.Empty()
+
+    # Metode RPC untuk Mengambil Riwayat Perubahan Flag dari Database dan Meng-formatnya ke dalam Response protobuf yang Sesuai
 
     def GetHistory(self, request, context):
         rows = self._logger.get_history(
@@ -49,21 +62,24 @@ class AuditLoggerServicer(killswitch_pb2_grpc.AuditLoggerServicer):
         ]
         return killswitch_pb2.AuditHistoryResponse(records=records)
 
+    # Client Subscribe ke Server untuk Menerima Log Perubahan secara Real-time
+
     def StreamHistory(self, request, context):
         q = queue.Queue()
-        self._logger.add_subscriber(q)
+        self._logger.add_subscriber(q) # Register subscriber agar mendapatkan update log terbaru
         try:
             while context.is_active():
                 try:
                     record = q.get(timeout=1.0)
                 except queue.Empty:
                     continue
-                if record is _SENTINEL:
+                if record is _SENTINEL: # Sentinel = sinyal shutdown: Hentikan stream (Graceful Shutdown)
                     break
-                yield record
+                yield record # Kirim Log ke Client (streaming)
         finally:
-            self._logger.remove_subscriber(q)
+            self._logger.remove_subscriber(q) # Cleanup: Pastikan subscriber dihapus saat Shutdown / Error
 
+# Inisialisasi dan menjalankan gRPC server AuditLogger
 
 def serve():
     audit_logger = AuditLogger()
