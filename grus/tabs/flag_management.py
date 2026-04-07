@@ -187,6 +187,90 @@ class FlagInfoModal(ModalScreen):
         self.dismiss()
 
 
+class EditFlagModal(ModalScreen[dict | None]):
+
+    BINDINGS = [
+        Binding("escape", "cancel", show=False),
+    ]
+
+    CSS = """
+    EditFlagModal {
+        align: center middle;
+    }
+
+    #edit-dialog {
+        width: 60;
+        max-width: 95%;
+        min-width: 40;
+        height: auto;
+        max-height: 80%;
+        border: solid $panel;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #edit-dialog Label {
+        margin-top: 1;
+    }
+
+    #edit-dialog Input {
+        margin-bottom: 0;
+    }
+
+    #edit-buttons {
+        margin-top: 1;
+        align: center middle;
+    }
+
+    #edit-buttons Button {
+        margin: 0 1;
+    }
+    """
+
+    def __init__(self, flag_data: dict):
+        super().__init__()
+        self._flag = flag_data
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="edit-dialog"):
+            yield Label(f"[b]Edit Flag: {self._flag['name']}[/]")
+            yield Label("Description:")
+            yield Input(
+                value=self._flag.get('description', ''),
+                placeholder="Short description",
+                id="flag-desc",
+            )
+            yield Label("Enabled:")
+            with Horizontal():
+                yield Switch(
+                    value=bool(self._flag.get('enabled', False)),
+                    id="flag-enabled",
+                )
+            with Horizontal(id="edit-buttons"):
+                yield Button("Save", variant="primary", id="btn-save")
+                yield Button("Cancel", id="btn-cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#flag-desc", Input).focus()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def on_button_pressed(self, event: Button.Pressed):
+        if event.button.id == "btn-save":
+            desc = self.query_one("#flag-desc", Input).value.strip()
+            enabled = self.query_one("#flag-enabled", Switch).value
+            self.dismiss(
+                {
+                    "name": self._flag['name'],
+                    "description": desc,
+                    "enabled": enabled,
+                }
+            )
+        else:
+            self.dismiss(None)
+
+
 class DeleteConfirmModal(ModalScreen[bool]):
 
     CSS = """
@@ -244,6 +328,7 @@ class FlagManagementTab(Container):
     BINDINGS = [
         Binding("t", "toggle_flag", "Toggle", show=True),
         Binding("a", "add_flag", "Add", show=True),
+        Binding("e", "edit_flag", "Edit", show=True),
         Binding("d", "delete_flag", "Delete", show=True),
         Binding("i", "flag_info", "Info", show=True),
         Binding("r", "refresh", "Refresh", show=True),
@@ -394,7 +479,7 @@ class FlagManagementTab(Container):
     def compose(self) -> ComposeResult:
         yield Static(
             "[b]Flag Management[/]  |  "
-            "[dim]T[/]:Toggle  [dim]A[/]:Add  [dim]D[/]:Delete  "
+            "[dim]T[/]:Toggle  [dim]A[/]:Add  [dim]E[/]:Edit  [dim]D[/]:Delete  "
             "[dim]I[/]:Info  [dim]R[/]:Refresh  [dim]X[/]:Export",
             id="flag-header",
         )
@@ -604,6 +689,43 @@ class FlagManagementTab(Container):
             threading.Thread(target=_do_add, daemon=True).start()
 
         self.app.push_screen(AddFlagModal(existing_flags=self._flags), callback=_on_result)
+
+    def action_edit_flag(self):
+        flag = self._get_selected_flag()
+        if flag is None:
+            self.notify("No flag selected.", severity="warning")
+            return
+
+        def _on_result(result):
+            if result is None:
+                return
+
+            def _do_edit():
+                try:
+                    resp = self._client.set_flag(
+                        name=result['name'],
+                        enabled=result['enabled'],
+                        description=result['description'],
+                        changed_by='grus-operator',
+                        reason='Edited via Grus TUI',
+                    )
+                    if resp.success:
+                        self.app.call_from_thread(self._load_flags)
+                        self.app.call_from_thread(
+                            self.notify, f"Flag '{result['name']}' updated."
+                        )
+                    else:
+                        self.app.call_from_thread(
+                            self.notify, f"Denied: {resp.message}", severity="error"
+                        )
+                except Exception as e:
+                    self.app.call_from_thread(
+                        self.notify, f"Edit failed: {e}", severity="error"
+                    )
+
+            threading.Thread(target=_do_edit, daemon=True).start()
+
+        self.app.push_screen(EditFlagModal(flag), callback=_on_result)
 
     def action_delete_flag(self):
         flag = self._get_selected_flag()

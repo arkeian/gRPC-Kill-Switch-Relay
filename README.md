@@ -123,7 +123,8 @@ Menampilkan seluruh flag beserta status (ON/OFF), badge protected, dan indikator
 |--------|--------|
 | `T` | Toggle flag (enable/disable) |
 | `A` | Tambah flag baru |
-| `D` | Nonaktifkan flag |
+| `E` | Edit flag (ubah deskripsi dan status) |
+| `D` | Hapus flag |
 | `I` | Lihat detail flag |
 | `R` | Refresh daftar |
 | `X` | Ekspor ke JSON |
@@ -139,7 +140,12 @@ Menampilkan output real-time dari `SubscribeFlags` — setiap perubahan flag mun
 | `F` | Filter berdasarkan nama flag |
 | `S` | Cari teks |
 
-### Tab 3: Audit History
+Perubahan flag ditampilkan dengan tipe berikut:
+- **ENABLED** (hijau) - Flag diaktifkan
+- **UPDATED** (biru) - Flag diubah (deskripsi atau status via Edit)
+- **DISABLED** (merah) - Flag dinonaktifkan
+- **DELETED** (merah terang) - Flag dihapus
+
 
 Tabel riwayat audit dengan paginasi.
 

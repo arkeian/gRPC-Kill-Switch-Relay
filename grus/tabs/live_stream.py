@@ -81,6 +81,8 @@ class LiveStreamTab(Container):
 
                     if change == 'ENABLED':
                         line = f"[green][{ts}] {name}: ENABLED by {by}[/]"
+                    elif change == 'UPDATED':
+                        line = f"[blue][{ts}] {name}: UPDATED by {by}[/]"
                     elif change == 'DELETED':
                         line = f"[red][{ts}] {name}: DELETED by {by}[/]"
                     else:

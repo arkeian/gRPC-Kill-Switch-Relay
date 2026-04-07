@@ -227,6 +227,41 @@ def scenario_5_delete_flag(fs_stub, bc_stub, audit_stub):
     assert_eq('delete audit reason contains deleted', 'deleted via grus tui' in rec.reason.lower(), True)
 
 
+def scenario_6_edit_flag(fs_stub, bc_stub, audit_stub):
+    print('\nScenario 6: Edit flag updates properties and broadcasts UPDATED')
+
+    received = queue.Queue()
+
+    def subscribe():
+        for update in bc_stub.SubscribeFlags(killswitch_pb2.Empty()):
+            received.put(update)
+
+    t = threading.Thread(target=subscribe, daemon=True)
+    t.start()
+    time.sleep(0.3)
+
+    resp = set_flag(fs_stub, 'cache-only-mode', True,
+                    reason='Edited via Grus TUI', desc='Updated cache behavior')
+    assert_eq('SetFlag edit success', resp.success, True)
+
+    try:
+        update = received.get(timeout=5)
+        assert_eq('Edit FlagUpdate flag name', update.flag.name, 'cache-only-mode')
+        assert_eq('Edit FlagUpdate flag enabled', update.flag.enabled, True)
+        assert_eq('Edit FlagUpdate change_type', update.change_type, 'UPDATED')
+    except queue.Empty:
+        print(f'  {FAIL}  No edit FlagUpdate received within 5s')
+        sys.exit(1)
+
+    history = audit_stub.GetHistory(
+        killswitch_pb2.AuditQuery(flag_name='cache-only-mode', limit=5)
+    )
+    assert_eq('audit edit record count >= 1', len(history.records) >= 1, True)
+    rec = history.records[0]
+    assert_eq('edit audit flag_name', rec.flag_name, 'cache-only-mode')
+    assert_eq('edit audit reason contains edited', 'edited via grus tui' in rec.reason.lower(), True)
+
+
 def main():
     _tz_jakarta = datetime.timezone(datetime.timedelta(hours=7))
     current_hour = datetime.datetime.now(_tz_jakarta).hour
@@ -263,6 +298,7 @@ def main():
     scenario_3_audit_history(fs_stub, audit_stub)
     scenario_4_multi_flag_stream(fs_stub, bc_stub)
     scenario_5_delete_flag(fs_stub, bc_stub, audit_stub)
+    scenario_6_edit_flag(fs_stub, bc_stub, audit_stub)
 
     print('\nSUCCESS: All scenarios passed!')
 

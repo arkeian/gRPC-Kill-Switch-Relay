@@ -61,6 +61,7 @@ class FlagStore:
 
         old_enabled = current_row['enabled'] if current_row else False
         delete_requested = not proposed.enabled and 'delete' in reason.lower()
+        edit_requested = 'edit' in reason.lower()
 
         if delete_requested and current_row is None:
             return False, f"Flag '{proposed.name}' not found"
@@ -111,7 +112,10 @@ class FlagStore:
                 )
                 self._conn.commit()
             log.info("Persisted: flag='%s' enabled=%s by='%s'", proposed.name, proposed.enabled, changed_by)
-            change_type = 'ENABLED' if proposed.enabled else 'DISABLED'
+            if edit_requested:
+                change_type = 'UPDATED'
+            else:
+                change_type = 'ENABLED' if proposed.enabled else 'DISABLED'
 
         flag_update = killswitch_pb2.FlagUpdate(
             flag=proposed,
