@@ -227,9 +227,21 @@ class EditFlagModal(ModalScreen[dict | None]):
     }
     """
 
-    def __init__(self, flag_data: dict):
+    def __init__(self, flag_data: dict, existing_flags: list[dict] | None = None):
         super().__init__()
         self._flag = flag_data
+        existing_flags = existing_flags or []
+        self._flag_enabled_by_name: dict[str, bool] = {
+            f.get("name", ""): bool(f.get("enabled", False))
+            for f in existing_flags
+            if f.get("name") and f.get("name") != flag_data.get("name")
+        }
+        # Add self to the list for mutex options (excluding self)
+        self._all_flag_names = sorted(self._flag_enabled_by_name.keys())
+        self._mutex_options = [("None", "")]
+        self._mutex_options.extend(
+            (name, name) for name in self._all_flag_names
+        )
 
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="edit-dialog"):
@@ -246,25 +258,72 @@ class EditFlagModal(ModalScreen[dict | None]):
                     value=bool(self._flag.get('enabled', False)),
                     id="flag-enabled",
                 )
+            yield Label("Protected:")
+            with Horizontal():
+                yield Switch(
+                    value=bool(self._flag.get('protected', False)),
+                    id="flag-protected",
+                )
+            yield Label("Mutex With:")
+            yield Select(
+                self._mutex_options,
+                id="flag-mutex",
+                prompt="Select a flag...",
+            )
             with Horizontal(id="edit-buttons"):
                 yield Button("Save", variant="primary", id="btn-save")
                 yield Button("Cancel", id="btn-cancel")
 
     def on_mount(self) -> None:
         self.query_one("#flag-desc", Input).focus()
+        self._update_save_enabled()
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+    def _apply_enabled_lock(self) -> None:
+        enabled_switch = self.query_one("#flag-enabled", Switch)
+        mutex_select = self.query_one("#flag-mutex", Select)
+
+        mutex_with = mutex_select.value
+        if mutex_with is Select.BLANK or mutex_with is Select.NULL:
+            mutex_with = ""
+        if mutex_with and mutex_with in self._flag_enabled_by_name:
+            partner_enabled = self._flag_enabled_by_name[mutex_with]
+            enabled_switch.value = not partner_enabled
+            enabled_switch.disabled = True
+        else:
+            enabled_switch.disabled = False
+
+        self._update_save_enabled()
+
+    def _update_save_enabled(self) -> None:
+        mutex_with = self.query_one("#flag-mutex", Select).value
+        mutex_selected = mutex_with is not Select.BLANK and mutex_with is not Select.NULL
+
+        save_btn = self.query_one("#btn-save", Button)
+        save_btn.disabled = not mutex_selected
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "flag-mutex":
+            self._apply_enabled_lock()
 
     def on_button_pressed(self, event: Button.Pressed):
         if event.button.id == "btn-save":
             desc = self.query_one("#flag-desc", Input).value.strip()
             enabled = self.query_one("#flag-enabled", Switch).value
+            protected = self.query_one("#flag-protected", Switch).value
+            mutex_with = self.query_one("#flag-mutex", Select).value
+            if mutex_with is Select.BLANK or mutex_with is Select.NULL:
+                self.notify("Please select a Mutex option (None or a flag).", severity="warning")
+                return
             self.dismiss(
                 {
                     "name": self._flag['name'],
                     "description": desc,
                     "enabled": enabled,
+                    "protected": protected,
+                    "mutex_with": mutex_with or "",
                 }
             )
         else:
@@ -710,6 +769,23 @@ class FlagManagementTab(Container):
                         reason='Edited via Grus TUI',
                     )
                     if resp.success:
+                        try:
+                            old_protected = bool(flag.get('protected', False))
+                            new_protected = bool(result.get('protected', False))
+                            mutex_with = str(result.get('mutex_with', '') or '')
+                            
+                            if old_protected != new_protected or mutex_with:
+                                self._apply_policy_updates(
+                                    new_flag_name=result['name'],
+                                    protected=new_protected,
+                                    mutex_with=mutex_with,
+                                )
+                        except Exception as e:
+                            self.app.call_from_thread(
+                                self.notify,
+                                f"Policy rules update failed: {e}",
+                                severity="error",
+                            )
                         self.app.call_from_thread(self._load_flags)
                         self.app.call_from_thread(
                             self.notify, f"Flag '{result['name']}' updated."
@@ -725,7 +801,7 @@ class FlagManagementTab(Container):
 
             threading.Thread(target=_do_edit, daemon=True).start()
 
-        self.app.push_screen(EditFlagModal(flag), callback=_on_result)
+        self.app.push_screen(EditFlagModal(flag, existing_flags=self._flags), callback=_on_result)
 
     def action_delete_flag(self):
         flag = self._get_selected_flag()
