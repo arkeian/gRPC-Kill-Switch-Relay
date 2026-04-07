@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 import threading
 import time
 
@@ -7,8 +8,14 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Static, DataTable, Input, Button, Label, Switch
+from textual.widgets import Static, DataTable, Input, Button, Label, Switch, Select
+
+
 class AddFlagModal(ModalScreen[dict | None]):
+
+    BINDINGS = [
+        Binding("escape", "cancel", show=False),
+    ]
 
     CSS = """
     AddFlagModal {
@@ -44,6 +51,19 @@ class AddFlagModal(ModalScreen[dict | None]):
     }
     """
 
+    def __init__(self, existing_flags: list[dict] | None = None):
+        super().__init__()
+        existing_flags = existing_flags or []
+        self._flag_enabled_by_name: dict[str, bool] = {
+            f.get("name", ""): bool(f.get("enabled", False))
+            for f in existing_flags
+            if f.get("name")
+        }
+        self._mutex_options = [("None", "")]
+        self._mutex_options.extend(
+            (name, name) for name in sorted(self._flag_enabled_by_name.keys())
+        )
+
     def compose(self) -> ComposeResult:
         with VerticalScroll(id="add-dialog"):
             yield Label("[b]Add New Flag[/]")
@@ -54,17 +74,78 @@ class AddFlagModal(ModalScreen[dict | None]):
             yield Label("Enabled:")
             with Horizontal():
                 yield Switch(value=False, id="flag-enabled")
+            yield Label("Protected:")
+            with Horizontal():
+                yield Switch(value=False, id="flag-protected")
+            yield Label("Mutex With:")
+            yield Select(
+                self._mutex_options,
+                id="flag-mutex",
+                prompt="Select a flag...",
+            )
             with Horizontal(id="add-buttons"):
                 yield Button("Create", variant="primary", id="btn-create")
                 yield Button("Cancel", id="btn-cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#flag-name", Input).focus()
+        self._update_create_enabled()
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+    def _apply_enabled_lock(self) -> None:
+        enabled_switch = self.query_one("#flag-enabled", Switch)
+        mutex_select = self.query_one("#flag-mutex", Select)
+
+        mutex_with = mutex_select.value
+        if mutex_with is Select.BLANK or mutex_with is Select.NULL:
+            mutex_with = ""
+        if mutex_with and mutex_with in self._flag_enabled_by_name:
+            partner_enabled = self._flag_enabled_by_name[mutex_with]
+            enabled_switch.value = not partner_enabled
+            enabled_switch.disabled = True
+        else:
+            enabled_switch.disabled = False
+
+        self._update_create_enabled()
+
+    def _update_create_enabled(self) -> None:
+        name = self.query_one("#flag-name", Input).value.strip()
+        mutex_with = self.query_one("#flag-mutex", Select).value
+        mutex_selected = mutex_with is not Select.BLANK and mutex_with is not Select.NULL
+
+        create_btn = self.query_one("#btn-create", Button)
+        create_btn.disabled = not (bool(name) and mutex_selected)
+
+    def on_select_changed(self, event: Select.Changed) -> None:
+        if event.select.id == "flag-mutex":
+            self._apply_enabled_lock()
+
+    def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id == "flag-name":
+            self._update_create_enabled()
 
     def on_button_pressed(self, event: Button.Pressed):
         if event.button.id == "btn-create":
             name = self.query_one("#flag-name", Input).value.strip()
             desc = self.query_one("#flag-desc", Input).value.strip()
             enabled = self.query_one("#flag-enabled", Switch).value
+            protected = self.query_one("#flag-protected", Switch).value
+            mutex_with = self.query_one("#flag-mutex", Select).value
+            if mutex_with is Select.BLANK or mutex_with is Select.NULL:
+                self.notify("Please select a Mutex option (None or a flag).", severity="warning")
+                return
             if name:
-                self.dismiss({"name": name, "description": desc, "enabled": enabled})
+                self.dismiss(
+                    {
+                        "name": name,
+                        "description": desc,
+                        "enabled": enabled,
+                        "protected": protected,
+                        "mutex_with": mutex_with or "",
+                    }
+                )
             else:
                 self.notify("Flag name is required.", severity="error")
         else:
@@ -139,19 +220,124 @@ class FlagManagementTab(Container):
         self._cfg = cfg
         self._flags = []
 
+        self._policy_rules_path = cfg.get('_policy_config_file', '')
+
         try:
             import tomli
         except ModuleNotFoundError:
             import tomllib as tomli
 
-        rules_path = cfg.get('_policy_config_file', '')
         self._protected = set()
         self._mutex_pairs = []
-        if rules_path and os.path.isfile(rules_path):
+        self._reload_policy_rules(tomli)
+
+    def _reload_policy_rules(self, tomli_module=None) -> None:
+        try:
+            if tomli_module is None:
+                try:
+                    import tomli as tomli_module
+                except ModuleNotFoundError:
+                    import tomllib as tomli_module
+
+            rules_path = self._policy_rules_path
+            if rules_path and os.path.isfile(rules_path):
+                with open(rules_path, 'rb') as f:
+                    rules = tomli_module.load(f)
+                self._protected = set(rules.get('protected_flags', []))
+                self._mutex_pairs = [tuple(g['flags']) for g in rules.get('mutual_exclusion', [])]
+            else:
+                self._protected = set()
+                self._mutex_pairs = []
+        except Exception:
+            self._protected = set()
+            self._mutex_pairs = []
+
+    def _read_policy_rules(self) -> dict:
+        rules_path = self._policy_rules_path
+        if not rules_path or not os.path.isfile(rules_path):
+            return {}
+        try:
+            try:
+                import tomli
+            except ModuleNotFoundError:
+                import tomllib as tomli
             with open(rules_path, 'rb') as f:
-                rules = tomli.load(f)
-            self._protected = set(rules.get('protected_flags', []))
-            self._mutex_pairs = [tuple(g['flags']) for g in rules.get('mutual_exclusion', [])]
+                return tomli.load(f)
+        except Exception:
+            return {}
+
+    def _write_policy_rules(self, rules: dict) -> None:
+        rules_path = self._policy_rules_path
+        if not rules_path:
+            raise RuntimeError("Policy rules file not configured")
+
+        protected_flags = sorted(set(rules.get('protected_flags', [])))
+        mutex_groups = rules.get('mutual_exclusion', [])
+        mutex_pairs: list[tuple[str, str]] = []
+        for g in mutex_groups:
+            flags = g.get('flags', []) if isinstance(g, dict) else []
+            if isinstance(flags, list) and len(flags) == 2:
+                a, b = str(flags[0]), str(flags[1])
+                if a and b and a != b:
+                    mutex_pairs.append((a, b))
+
+        mw = rules.get('maintenance_window', {}) if isinstance(rules.get('maintenance_window', {}), dict) else {}
+        start_hour = int(mw.get('start_hour', 2))
+        end_hour = int(mw.get('end_hour', 4))
+        timezone_offset = int(mw.get('timezone_offset', 7))
+
+        lines: list[str] = []
+        lines.append(f"protected_flags = {json.dumps(protected_flags)}")
+        lines.append("")
+        for a, b in mutex_pairs:
+            lines.append("[[mutual_exclusion]]")
+            lines.append(f"flags = {json.dumps([a, b])}")
+            lines.append("")
+        lines.append("[maintenance_window]")
+        lines.append(f"start_hour = {start_hour}")
+        lines.append(f"end_hour = {end_hour}")
+        lines.append(f"timezone_offset = {timezone_offset}")
+        lines.append("")
+
+        os.makedirs(os.path.dirname(rules_path) or '.', exist_ok=True)
+        with tempfile.NamedTemporaryFile('w', delete=False, dir=os.path.dirname(rules_path) or '.', encoding='utf-8') as tmp:
+            tmp.write("\n".join(lines))
+            tmp_path = tmp.name
+        os.replace(tmp_path, rules_path)
+
+    def _apply_policy_updates(self, new_flag_name: str, protected: bool, mutex_with: str) -> None:
+        if not self._policy_rules_path:
+            return
+
+        rules = self._read_policy_rules()
+        if not rules:
+            rules = {
+                'protected_flags': [],
+                'mutual_exclusion': [],
+                'maintenance_window': {'start_hour': 2, 'end_hour': 4, 'timezone_offset': 7},
+            }
+
+        if protected:
+            pf = list(rules.get('protected_flags', []))
+            if new_flag_name not in pf:
+                pf.append(new_flag_name)
+            rules['protected_flags'] = pf
+
+        if mutex_with and mutex_with != new_flag_name:
+            existing = set()
+            for g in rules.get('mutual_exclusion', []) or []:
+                flags = g.get('flags', []) if isinstance(g, dict) else []
+                if isinstance(flags, list) and len(flags) == 2:
+                    existing.add(tuple(sorted((str(flags[0]), str(flags[1])))))
+
+            key = tuple(sorted((new_flag_name, mutex_with)))
+            if key not in existing:
+                groups = list(rules.get('mutual_exclusion', []))
+                groups.append({'flags': [new_flag_name, mutex_with]})
+                rules['mutual_exclusion'] = groups
+
+        self._write_policy_rules(rules)
+        self._reload_policy_rules()
 
     def compose(self) -> ComposeResult:
         yield Static(
@@ -168,14 +354,98 @@ class FlagManagementTab(Container):
     def on_mount(self):
         self._load_flags()
         self.query_one("#flag-table", DataTable).focus()
+        self.set_interval(30.0, self._periodic_prune_policy_rules)
+
+    def _periodic_prune_policy_rules(self) -> None:
+        if not self._policy_rules_path:
+            return
+
+        def _do_prune():
+            try:
+                resp = self._client.list_flags()
+                existing_names = {f.name for f in resp.flags}
+                changed = self._prune_policy_rules(existing_names)
+                if changed:
+                    self.app.call_from_thread(self._load_flags)
+            except Exception:
+                return
+
+        threading.Thread(target=_do_prune, daemon=True).start()
+
+    def _prune_policy_rules(self, existing_names: set[str]) -> bool:
+        """Remove stale/invalid entries from policy_rules.toml.
+
+        - Drops any mutex group containing Select.NULL
+        - De-dupes mutex pairs (unordered)
+        """
+
+        if not self._policy_rules_path:
+            return False
+
+        rules = self._read_policy_rules()
+        if not rules:
+            return False
+
+        original = json.dumps(rules, sort_keys=True, default=str)
+
+        pf = rules.get('protected_flags', [])
+        if not isinstance(pf, list):
+            pf = []
+        pf_clean = [str(x) for x in pf if str(x) and str(x) != 'Select.NULL']
+        rules['protected_flags'] = sorted(set(pf_clean))
+
+        mutex_groups = rules.get('mutual_exclusion', [])
+        if not isinstance(mutex_groups, list):
+            mutex_groups = []
+
+        seen_pairs: set[tuple[str, str]] = set()
+        cleaned_groups: list[dict] = []
+        for g in mutex_groups:
+            if not isinstance(g, dict):
+                continue
+            flags = g.get('flags', [])
+            if not isinstance(flags, list) or len(flags) != 2:
+                continue
+            a, b = str(flags[0]), str(flags[1])
+            if not a or not b or a == b:
+                continue
+            if a == 'Select.NULL' or b == 'Select.NULL':
+                continue
+
+            key = tuple(sorted((a, b)))
+            if key in seen_pairs:
+                continue
+            seen_pairs.add(key)
+            cleaned_groups.append({'flags': [a, b]})
+
+        rules['mutual_exclusion'] = cleaned_groups
+
+        updated = json.dumps(rules, sort_keys=True, default=str)
+        if updated == original:
+            return False
+
+        self._write_policy_rules(rules)
+        self._reload_policy_rules()
+        return True
 
     def _load_flags(self):
+        self._reload_policy_rules()
         table = self.query_one("#flag-table", DataTable)
         table.clear()
         self._flags = []
 
         try:
             resp = self._client.list_flags()
+            existing_names = {f.name for f in resp.flags}
+            try:
+                self._prune_policy_rules(existing_names)
+            except Exception:
+                pass
+            display_mutex_pairs = [
+                (a, b)
+                for (a, b) in self._mutex_pairs
+                if a in existing_names and b in existing_names
+            ]
             for f in resp.flags:
                 flag_dict = {
                     'name': f.name,
@@ -189,7 +459,7 @@ class FlagManagementTab(Container):
                 badges = []
                 if f.name in self._protected:
                     badges.append("[yellow]protected[/]")
-                for a, b in self._mutex_pairs:
+                for a, b in display_mutex_pairs:
                     if f.name in (a, b):
                         partner = b if f.name == a else a
                         badges.append(f"[cyan]\u21c4 mutex:{partner}[/]")
@@ -254,6 +524,18 @@ class FlagManagementTab(Container):
                         reason='Created via Grus TUI',
                     )
                     if resp.success:
+                        try:
+                            self._apply_policy_updates(
+                                new_flag_name=result['name'],
+                                protected=bool(result.get('protected', False)),
+                                mutex_with=str(result.get('mutex_with', '') or ''),
+                            )
+                        except Exception as e:
+                            self.app.call_from_thread(
+                                self.notify,
+                                f"Policy rules update failed: {e}",
+                                severity="error",
+                            )
                         self.app.call_from_thread(self._load_flags)
                         self.app.call_from_thread(
                             self.notify, f"Flag '{result['name']}' created."
@@ -269,7 +551,7 @@ class FlagManagementTab(Container):
 
             threading.Thread(target=_do_add, daemon=True).start()
 
-        self.app.push_screen(AddFlagModal(), callback=_on_result)
+        self.app.push_screen(AddFlagModal(existing_flags=self._flags), callback=_on_result)
 
     def action_delete_flag(self):
         flag = self._get_selected_flag()

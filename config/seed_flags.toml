@@ -19,6 +19,11 @@ enabled = false
 description = "Serve responses from cache only, skip upstream calls"
 
 [[flags]]
+name = "disable-cache-refresh"
+enabled = true
+description = "Disables cache refreshing"
+
+[[flags]]
 name = "slow-mode"
 enabled = false
 description = "Throttle incoming requests to reduce system load"

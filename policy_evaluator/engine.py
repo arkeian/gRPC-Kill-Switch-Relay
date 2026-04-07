@@ -1,5 +1,6 @@
 import datetime
 import os
+import threading
 
 try:
     import tomli
@@ -7,24 +8,76 @@ except ModuleNotFoundError:
     import tomllib as tomli
 
 _rules_path = os.environ.get('GRUS_POLICY_CONFIG', '')
-_rules = {}
-if _rules_path and os.path.isfile(_rules_path):
-    with open(_rules_path, 'rb') as _f:
-        _rules = tomli.load(_f)
+_rules_mtime: float | None = None
+_rules_lock = threading.Lock()
 
-PROTECTED_FLAGS = set(_rules.get('protected_flags', ['payment-fallback']))
+PROTECTED_FLAGS: set[str] = set(['payment-fallback'])
+MUTEX_PAIRS: list[tuple[str, str]] = [('cache-only-mode', 'disable-cache-refresh')]
 
-MUTEX_PAIRS = [
-    tuple(group['flags'])
-    for group in _rules.get('mutual_exclusion', [{'flags': ['cache-only-mode', 'disable-cache-refresh']}])
-]
+_TZ_JAKARTA = datetime.timezone(datetime.timedelta(hours=7))
+MAINTENANCE_WINDOW_LOCAL = (2, 4)
 
-_mw = _rules.get('maintenance_window', {})
-_TZ_JAKARTA = datetime.timezone(datetime.timedelta(hours=_mw.get('timezone_offset', 7)))
-MAINTENANCE_WINDOW_LOCAL = (_mw.get('start_hour', 2), _mw.get('end_hour', 4))
+
+def _load_rules_from_file(path: str) -> dict:
+    if not path or not os.path.isfile(path):
+        return {}
+    with open(path, 'rb') as f:
+        return tomli.load(f)
+
+
+def _apply_rules(rules: dict) -> None:
+    global PROTECTED_FLAGS, MUTEX_PAIRS, _TZ_JAKARTA, MAINTENANCE_WINDOW_LOCAL
+
+    protected_flags = rules.get('protected_flags', ['payment-fallback'])
+    if not isinstance(protected_flags, list):
+        protected_flags = ['payment-fallback']
+    PROTECTED_FLAGS = set(str(x) for x in protected_flags)
+
+    mutex_groups = rules.get('mutual_exclusion', [{'flags': ['cache-only-mode', 'disable-cache-refresh']}])
+    pairs: list[tuple[str, str]] = []
+    if isinstance(mutex_groups, list):
+        for group in mutex_groups:
+            if not isinstance(group, dict):
+                continue
+            flags = group.get('flags', [])
+            if isinstance(flags, list) and len(flags) == 2:
+                a, b = str(flags[0]), str(flags[1])
+                if a and b and a != b:
+                    pairs.append((a, b))
+    MUTEX_PAIRS = pairs
+
+    mw = rules.get('maintenance_window', {}) if isinstance(rules.get('maintenance_window', {}), dict) else {}
+    tz_offset = int(mw.get('timezone_offset', 7))
+    _TZ_JAKARTA = datetime.timezone(datetime.timedelta(hours=tz_offset))
+    MAINTENANCE_WINDOW_LOCAL = (int(mw.get('start_hour', 2)), int(mw.get('end_hour', 4)))
+
+
+def _reload_rules_if_needed() -> None:
+    global _rules_mtime
+    if not _rules_path or not os.path.isfile(_rules_path):
+        return
+    try:
+        mtime = os.path.getmtime(_rules_path)
+    except OSError:
+        return
+
+    with _rules_lock:
+        if _rules_mtime == mtime:
+            return
+        try:
+            rules = _load_rules_from_file(_rules_path)
+            _apply_rules(rules)
+            _rules_mtime = mtime
+        except Exception:
+            # If reload fails, keep the last known-good rules.
+            return
+
+
+_reload_rules_if_needed()
 
 
 def validate_change(proposed_flag, context_flags):
+    _reload_rules_if_needed()
     current_state = {f.name: f.enabled for f in context_flags}
 
     if proposed_flag.name in PROTECTED_FLAGS and not proposed_flag.enabled:
