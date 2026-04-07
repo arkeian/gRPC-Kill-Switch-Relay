@@ -9,6 +9,7 @@ echo "==> Installing gRPC dependencies..."
 pip install grpcio grpcio-tools protobuf
 
 echo "==> Generating Python stubs from killswitch.proto..."
+mkdir -p "$OUT_DIR"
 python -m grpc_tools.protoc \
     --proto_path="$PROTO_DIR" \
     --python_out="$OUT_DIR" \

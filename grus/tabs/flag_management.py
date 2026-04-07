@@ -187,6 +187,58 @@ class FlagInfoModal(ModalScreen):
         self.dismiss()
 
 
+class DeleteConfirmModal(ModalScreen[bool]):
+
+    CSS = """
+    DeleteConfirmModal {
+        align: center middle;
+    }
+
+    #delete-dialog {
+        width: 60;
+        max-width: 95%;
+        min-width: 40;
+        height: auto;
+        max-height: 80%;
+        border: solid $panel;
+        background: $surface;
+        padding: 1 2;
+    }
+
+    #delete-dialog Label,
+    #delete-dialog Static {
+        margin-bottom: 1;
+    }
+
+    #delete-buttons {
+        margin-top: 1;
+        align: center middle;
+    }
+
+    #delete-buttons Button {
+        margin: 0 1;
+    }
+    """
+
+    def __init__(self, flag_name: str):
+        super().__init__()
+        self._flag_name = flag_name
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="delete-dialog"):
+            yield Label(f"[b]Delete flag '{self._flag_name}'?[/]")
+            yield Static("This action will permanently remove the flag.\nAre you sure you want to continue?")
+            with Horizontal(id="delete-buttons"):
+                yield Button("Delete", variant="error", id="btn-delete")
+                yield Button("Cancel", id="btn-cancel")
+
+    def on_button_pressed(self, event: Button.Pressed):
+        if event.button.id == "btn-delete":
+            self.dismiss(True)
+        else:
+            self.dismiss(False)
+
+
 class FlagManagementTab(Container):
 
     BINDINGS = [
@@ -559,30 +611,36 @@ class FlagManagementTab(Container):
             self.notify("No flag selected.", severity="warning")
             return
 
-        def _do_disable():
-            try:
-                resp = self._client.set_flag(
-                    name=flag['name'],
-                    enabled=False,
-                    description=flag['description'],
-                    changed_by='grus-operator',
-                    reason='Disabled via Grus TUI (delete)',
-                )
-                if resp.success:
-                    self.app.call_from_thread(self._load_flags)
-                    self.app.call_from_thread(
-                        self.notify, f"Flag '{flag['name']}' disabled."
-                    )
-                else:
-                    self.app.call_from_thread(
-                        self.notify, f"Denied: {resp.message}", severity="error"
-                    )
-            except Exception as e:
-                self.app.call_from_thread(
-                    self.notify, f"Delete failed: {e}", severity="error"
-                )
+        def _on_confirm(result):
+            if not result:
+                return
 
-        threading.Thread(target=_do_disable, daemon=True).start()
+            def _do_delete():
+                try:
+                    resp = self._client.set_flag(
+                        name=flag['name'],
+                        enabled=False,
+                        description=flag['description'],
+                        changed_by='grus-operator',
+                        reason='Deleted via Grus TUI',
+                    )
+                    if resp.success:
+                        self.app.call_from_thread(self._load_flags)
+                        self.app.call_from_thread(
+                            self.notify, f"Flag '{flag['name']}' deleted."
+                        )
+                    else:
+                        self.app.call_from_thread(
+                            self.notify, f"Denied: {resp.message}", severity="error"
+                        )
+                except Exception as e:
+                    self.app.call_from_thread(
+                        self.notify, f"Delete failed: {e}", severity="error"
+                    )
+
+            threading.Thread(target=_do_delete, daemon=True).start()
+
+        self.app.push_screen(DeleteConfirmModal(flag['name']), callback=_on_confirm)
 
     def action_flag_info(self):
         flag = self._get_selected_flag()

@@ -52,7 +52,7 @@ class FlagStore:
     def set_flag(self, request, policy_stub, broadcaster_stub, audit_stub):
         proposed = request.flag
         changed_by = request.changed_by
-        reason = request.reason
+        reason = request.reason or ''
         now = int(time.time())
 
         with self._lock:
@@ -60,6 +60,10 @@ class FlagStore:
             all_rows = self._list_rows()
 
         old_enabled = current_row['enabled'] if current_row else False
+        delete_requested = not proposed.enabled and 'delete' in reason.lower()
+
+        if delete_requested and current_row is None:
+            return False, f"Flag '{proposed.name}' not found"
 
         current_flag_proto = killswitch_pb2.Flag(
             name=proposed.name,
@@ -87,25 +91,33 @@ class FlagStore:
             log.info("SetFlag denied: flag='%s' reason='%s'", proposed.name, policy_resp.denial_reason)
             return False, policy_resp.denial_reason
 
-        with self._lock:
-            self._conn.execute(
-                '''INSERT INTO flags (name, enabled, description, updated_at, updated_by)
-                   VALUES (?, ?, ?, ?, ?)
-                   ON CONFLICT(name) DO UPDATE SET
-                       enabled     = excluded.enabled,
-                       description = excluded.description,
-                       updated_at  = excluded.updated_at,
-                       updated_by  = excluded.updated_by''',
-                (proposed.name, int(proposed.enabled), proposed.description, now, changed_by),
-            )
-            self._conn.commit()
-        log.info("Persisted: flag='%s' enabled=%s by='%s'", proposed.name, proposed.enabled, changed_by)
+        if delete_requested:
+            with self._lock:
+                self._conn.execute('DELETE FROM flags WHERE name = ?', (proposed.name,))
+                self._conn.commit()
+            log.info("Deleted: flag='%s' by='%s'", proposed.name, changed_by)
+            change_type = 'DELETED'
+        else:
+            with self._lock:
+                self._conn.execute(
+                    '''INSERT INTO flags (name, enabled, description, updated_at, updated_by)
+                       VALUES (?, ?, ?, ?, ?)
+                       ON CONFLICT(name) DO UPDATE SET
+                           enabled     = excluded.enabled,
+                           description = excluded.description,
+                           updated_at  = excluded.updated_at,
+                           updated_by  = excluded.updated_by''',
+                    (proposed.name, int(proposed.enabled), proposed.description, now, changed_by),
+                )
+                self._conn.commit()
+            log.info("Persisted: flag='%s' enabled=%s by='%s'", proposed.name, proposed.enabled, changed_by)
+            change_type = 'ENABLED' if proposed.enabled else 'DISABLED'
 
         flag_update = killswitch_pb2.FlagUpdate(
             flag=proposed,
             changed_by=changed_by,
             timestamp=now,
-            change_type='ENABLED' if proposed.enabled else 'DISABLED',
+            change_type=change_type,
         )
         try:
             broadcaster_stub.NotifyChange(flag_update)
@@ -115,7 +127,7 @@ class FlagStore:
         audit_record = killswitch_pb2.AuditRecord(
             flag_name=proposed.name,
             old_value=old_enabled,
-            new_value=proposed.enabled,
+            new_value=False,
             changed_by=changed_by,
             changed_at=now,
             reason=reason,

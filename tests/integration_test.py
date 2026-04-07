@@ -190,6 +190,43 @@ def scenario_4_multi_flag_stream(fs_stub, bc_stub):
         assert_eq(f'update[{i}] flag enabled', collected[i].flag.enabled, enabled)
         assert_eq(f'update[{i}] change_type',  collected[i].change_type,  change_type)
 
+
+def scenario_5_delete_flag(fs_stub, bc_stub, audit_stub):
+    print('\nScenario 5: Delete flag removes it and broadcasts DELETED')
+
+    received = queue.Queue()
+
+    def subscribe():
+        for update in bc_stub.SubscribeFlags(killswitch_pb2.Empty()):
+            received.put(update)
+
+    t = threading.Thread(target=subscribe, daemon=True)
+    t.start()
+    time.sleep(0.3)
+
+    resp = set_flag(fs_stub, 'payment-fallback', False,
+                    reason='Deleted via Grus TUI')
+    assert_eq('SetFlag delete success', resp.success, True)
+
+    try:
+        update = received.get(timeout=5)
+        assert_eq('Delete FlagUpdate flag name', update.flag.name, 'payment-fallback')
+        assert_eq('Delete FlagUpdate flag enabled', update.flag.enabled, False)
+        assert_eq('Delete FlagUpdate change_type', update.change_type, 'DELETED')
+    except queue.Empty:
+        print(f'  {FAIL}  No delete FlagUpdate received within 5s')
+        sys.exit(1)
+
+    history = audit_stub.GetHistory(
+        killswitch_pb2.AuditQuery(flag_name='payment-fallback', limit=5)
+    )
+    assert_eq('audit delete record count >= 1', len(history.records) >= 1, True)
+    rec = history.records[0]
+    assert_eq('delete audit flag_name', rec.flag_name, 'payment-fallback')
+    assert_eq('delete audit new_value', rec.new_value, False)
+    assert_eq('delete audit reason contains deleted', 'deleted via grus tui' in rec.reason.lower(), True)
+
+
 def main():
     _tz_jakarta = datetime.timezone(datetime.timedelta(hours=7))
     current_hour = datetime.datetime.now(_tz_jakarta).hour
@@ -222,11 +259,12 @@ def main():
         audit_stub = killswitch_pb2_grpc.AuditLoggerStub(au_channel)
 
         scenario_1_set_and_propagate(fs_stub, bc_stub)
-        scenario_2_policy_denial(fs_stub)
-        scenario_3_audit_history(fs_stub, audit_stub)
-        scenario_4_multi_flag_stream(fs_stub, bc_stub)
+    scenario_2_policy_denial(fs_stub)
+    scenario_3_audit_history(fs_stub, audit_stub)
+    scenario_4_multi_flag_stream(fs_stub, bc_stub)
+    scenario_5_delete_flag(fs_stub, bc_stub, audit_stub)
 
-        print('\nSUCCESS: All scenarios passed!')
+    print('\nSUCCESS: All scenarios passed!')
 
     finally:
         stop_services(procs)
