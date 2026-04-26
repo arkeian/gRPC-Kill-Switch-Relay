@@ -3,6 +3,9 @@ protected_flags = ["payment-fallback"]
 [[mutual_exclusion]]
 flags = ["cache-only-mode", "disable-cache-refresh"]
 
+[[mutual_exclusion]]
+flags = ["tes-terserah", "disable-recommendations"]
+
 [maintenance_window]
 start_hour = 2
 end_hour = 4

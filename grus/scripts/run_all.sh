@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-export PYTHONPATH="$REPO_ROOT"
-LOG_DIR="$REPO_ROOT/logs"
-PID_FILE="$REPO_ROOT/run_all.pids"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+GRUS_ROOT="$REPO_ROOT/grus"
+export PYTHONPATH="$REPO_ROOT:$GRUS_ROOT"
+LOG_DIR="$GRUS_ROOT/logs"
+PID_FILE="$GRUS_ROOT/run_all.pids"
 
 mkdir -p "$LOG_DIR"
-mkdir -p "$REPO_ROOT/data"
+mkdir -p "$GRUS_ROOT/data"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Cleanup: kill all services on exit (Ctrl+C, SIGTERM, or normal exit)

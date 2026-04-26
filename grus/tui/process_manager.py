@@ -31,9 +31,10 @@ class ProcessManager:
         os.makedirs(log_dir, exist_ok=True)
         os.makedirs(os.path.join(self._project_root, 'data'), exist_ok=True)
 
+        repo_root = self._cfg.get('_repo_root', self._project_root)
         env = {
             **os.environ,
-            'PYTHONPATH': self._project_root,
+            'PYTHONPATH': f"{repo_root}{os.pathsep}{self._project_root}",
             'GRUS_CONFIG': self._cfg['_config_file'],
         }
         if '_policy_config_file' in self._cfg:

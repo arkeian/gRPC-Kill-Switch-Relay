@@ -20,6 +20,7 @@ def load_config(env='dev', project_root=None):
         cfg = tomli.load(f)
 
     cfg['_project_root'] = project_root
+    cfg['_repo_root'] = os.path.dirname(project_root)
     cfg['_config_file'] = config_file
     cfg['_env'] = env
 

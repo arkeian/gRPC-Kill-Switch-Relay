@@ -18,15 +18,17 @@ def main():
     args = parser.parse_args()
 
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    repo_root = os.path.dirname(project_root)
 
-    if project_root not in sys.path:
-        sys.path.insert(0, project_root)
+    for p in [repo_root, project_root]:
+        if p not in sys.path:
+            sys.path.insert(0, p)
 
-    from grus.config import load_config
-    from grus.proto_check import check_and_regenerate
-    from grus.process_manager import ProcessManager
-    from grus.grpc_client import GrpcClient
-    from grus.seed import prompt_and_seed
+    from tui.config import load_config
+    from tui.proto_check import check_and_regenerate
+    from tui.process_manager import ProcessManager
+    from tui.grpc_client import GrpcClient
+    from tui.seed import prompt_and_seed
 
     cfg = load_config(env=args.env, project_root=project_root)
 
@@ -47,7 +49,7 @@ def main():
     print("=" * 60)
 
     print("\n[grus] Checking protobuf files...")
-    check_and_regenerate(project_root)
+    check_and_regenerate(repo_root)
 
     print("[grus] Starting services...")
     pm = ProcessManager(cfg)
@@ -61,7 +63,7 @@ def main():
     print("\n[grus] Launching TUI...")
 
     try:
-        from grus.app import GrusApp
+        from tui.app import GrusApp
         app = GrusApp(cfg=cfg, grpc_client=client, process_manager=pm)
         app.run()
     except KeyboardInterrupt:

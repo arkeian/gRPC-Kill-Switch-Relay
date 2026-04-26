@@ -7,11 +7,11 @@ from textual.containers import Container, Horizontal
 from textual.widgets import Header, Footer, TabbedContent, TabPane, Static
 from textual.timer import Timer
 
-from grus.tabs.flag_management import FlagManagementTab
-from grus.tabs.live_stream import LiveStreamTab
-from grus.tabs.audit_history import AuditHistoryTab
-from grus.tabs.policy_testing import PolicyTestingTab
-from grus.tabs.system_logs import SystemLogsTab
+from tui.tabs.flag_management import FlagManagementTab
+from tui.tabs.live_stream import LiveStreamTab
+from tui.tabs.audit_history import AuditHistoryTab
+from tui.tabs.policy_testing import PolicyTestingTab
+from tui.tabs.system_logs import SystemLogsTab
 
 
 class ServiceStatus(Static):
