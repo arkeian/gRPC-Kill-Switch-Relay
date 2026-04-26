@@ -1,4 +1,4 @@
-# Grus: Kill Switch Relay
+# Grus - Kill Switch Relay Engine | Surg - Kill Switch Relay UI
 
 ## Anggota
 
@@ -11,7 +11,7 @@
 
 Grus adalah sistem flag operasional real-time berbasis gRPC untuk komunikasi antar layanan infrastruktur. Sistem ini menyediakan kill switch, circuit breaker, dan mode switch yang dapat diubah saat runtime. Setiap perubahan flag divalidasi oleh kebijakan, disiarkan ke subscriber secara real-time, dan dicatat dalam audit trail.
 
-Grus dilengkapi TUI (Terminal User Interface) interaktif yang menjalankan seluruh sistem dalam satu perintah.
+Surg adalah UI wrapper untuk engine Grus yang berbasis Socket.io.
 
 ## Arsitektur
 
