@@ -1,4 +1,4 @@
-# Grus × Surg — Kill Switch Relay
+# Grus dan Surg: Kill Switch Relay
 
 ## Anggota
 
