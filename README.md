@@ -1,6 +1,6 @@
 # Grus × Surg — Kill Switch Relay
 
-## Tim
+## Anggota
 
 | Nama | NRP |
 |------|-----|
@@ -11,34 +11,34 @@
 
 ## Apa Ini?
 
-**Grus** adalah engine feature flag real-time berbasis gRPC. Ia bertindak sebagai satu-satunya sumber kebenaran untuk seluruh status flag di sistem Anda — mulai dari kill switch darurat, circuit breaker, hingga mode eksperimen yang dapat diaktifkan dan dimatikan tanpa deploy ulang.
+**Grus** adalah engine feature flag real-time berbasis gRPC dan bertindak sebagai manajemen untuk seluruh status flag di sistem Anda, mulai dari kill switch darurat, circuit breaker, hingga mode eksperimen yang dapat diaktifkan dan dimatikan tanpa deploy ulang.
 
-**Surg** adalah UI wrapper berbasis web untuk Grus. Buka browser, lihat seluruh flag sistem secara live, ubah status dalam satu klik, dan pantau setiap perubahan yang terjadi secara real-time.
+**Surg** adalah UI wrapper berbasis web untuk Grus. Buka browser, lihat seluruh flag sistem secara live, mengubah status dalam satu klik, dan pantau setiap perubahan yang terjadi secara real-time.
 
 ---
 
 ## Mengapa Grus?
 
-Kebanyakan sistem manajemen flag bekerja dengan cara yang sama: klien melakukan polling ke server secara berkala untuk mengecek apakah ada perubahan. Artinya ada *jeda* antara perubahan dibuat dan efeknya dirasakan — bisa 30 detik, bisa 5 menit, tergantung interval polling.
+Mayoritas sistem manajemen flag bekerja dengan cara yang sama: klien melakukan polling ke server secara berkala untuk mengecek apakah ada perubahan. Artinya ada *jeda* antara perubahan dibuat dan efeknya dirasakan, kemungkinan bisa 30 detik, bisa 5 menit, tergantung interval polling.
 
 Grus bekerja secara berbeda.
 
 ### Propagasi Sub-Detik via gRPC Streaming
 
-Setiap perubahan flag dikirimkan ke seluruh subscriber secara langsung menggunakan server-streaming gRPC — bukan polling. Saat Anda mengubah flag di Surg, seluruh sistem yang berlangganan menerima perubahan tersebut dalam hitungan milidetik.
+Setiap perubahan flag dikirimkan ke seluruh subscriber secara langsung menggunakan server-streaming gRPC, bukan polling. Saat Anda mengubah flag di Surg, seluruh sistem yang berlangganan menerima perubahan tersebut dalam hitungan milidetik.
 
 ### Validasi Kebijakan Sebelum Perubahan Tersimpan
 
-Setiap mutasi melewati lapisan `PolicyEvaluator` sebelum data apa pun ditulis. Ini bukan validasi di sisi klien — ini enforcement di tingkat engine. Flag dapat dikonfigurasi sebagai:
+Setiap mutasi melewati lapisan `PolicyEvaluator` sebelum data apa pun ditulis. Flag dapat dikonfigurasi sebagai:
 
-- **Protected** — tidak dapat dinonaktifkan, bahkan oleh operator. Cocok untuk flag yang menjaga ketersediaan sistem kritis.
-- **Mutex** — dua flag tidak dapat aktif bersamaan. Jika flag A dinyalakan, flag B dimatikan secara otomatis, dan sebaliknya.
+- **Protected**: tidak dapat dinonaktifkan, bahkan oleh operator. Cocok untuk flag yang menjaga ketersediaan sistem kritis.
+- **Mutex**: dua flag tidak dapat aktif bersamaan. Jika flag A dinyalakan, flag B dimatikan secara otomatis, dan sebaliknya.
 
 Penolakan dikembalikan sebelum SQLite disentuh. Tidak ada setengah-perubahan, tidak ada state yang tidak konsisten.
 
 ### Audit Trail yang Tidak Dapat Dihilangkan
 
-Setiap perubahan — siapa, apa, kapan, mengapa, dan apakah disetujui oleh kebijakan — dicatat ke SQLite melalui `AuditLogger` yang berjalan sebagai layanan terpisah. Ini bukan log aplikasi biasa yang bisa terhapus saat container di-restart. Audit berjalan independen dari engine utama.
+Setiap perubahan, siapa, apa, kapan, mengapa, dan apakah disetujui oleh kebijakan akan dicatat ke SQLite melalui `AuditLogger` yang berjalan sebagai layanan terpisah. Ini bukan log aplikasi biasa yang bisa terhapus saat container di-restart. Audit berjalan independen dari engine utama.
 
 ### Arsitektur Microservices, Bukan Monolith Tersembunyi
 
@@ -96,7 +96,7 @@ cd gRPC-Kill-Switch-Relay
 **2. Buat virtual environment:**
 ```bash
 python -m venv .venv
-source .venv/bin/activate   # Linux/macOS
+source .venv/bin/activate   # (Linux/macOS)
 # atau: .venv\Scripts\activate  (Windows)
 ```
 
@@ -131,10 +131,11 @@ Grus akan menjalankan keempat layanan gRPC secara headless dan menunggu hingga C
 ### Opsi Environment
 
 ```bash
-grus --env=dev    # default — logging INFO
+grus --env=dev    # default, logging INFO
 grus --env=prod   # logging WARNING, tanpa prompt seed data
 ```
 
+**Catatan**: Surg hanya berjalan pada Grus versi prod.
 ---
 
 ## Konfigurasi
@@ -147,7 +148,7 @@ host = "localhost"
 port = 8080
 
 [operator]
-name = "nama-anda"          # diisi otomatis saat pertama kali dijalankan
+name = "[NAMA USER]"          # diisi otomatis saat pertama kali dijalankan
 
 [grus]
 executable = "grus"         # path ke binary grus
