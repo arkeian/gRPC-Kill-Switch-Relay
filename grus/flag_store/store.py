@@ -60,8 +60,10 @@ class FlagStore:
             all_rows = self._list_rows()
 
         old_enabled = current_row['enabled'] if current_row else False
-        delete_requested = not proposed.enabled and 'delete' in reason.lower()
-        edit_requested = 'edit' in reason.lower()
+        op = request.operation_type
+        delete_requested = (op == killswitch_pb2.OPERATION_DELETE)
+        edit_requested = (op == killswitch_pb2.OPERATION_EDIT)
+        add_requested = (op == killswitch_pb2.OPERATION_ADD)
 
         if delete_requested and current_row is None:
             return False, f"Flag '{proposed.name}' not found"
@@ -112,7 +114,9 @@ class FlagStore:
                 )
                 self._conn.commit()
             log.info("Persisted: flag='%s' enabled=%s by='%s'", proposed.name, proposed.enabled, changed_by)
-            if edit_requested:
+            if add_requested:
+                change_type = 'CREATED'
+            elif edit_requested:
                 change_type = 'UPDATED'
             else:
                 change_type = 'ENABLED' if proposed.enabled else 'DISABLED'
@@ -122,16 +126,18 @@ class FlagStore:
             changed_by=changed_by,
             timestamp=now,
             change_type=change_type,
+            old_value=old_enabled,
         )
         try:
             broadcaster_stub.NotifyChange(flag_update)
         except Exception as e:
             log.warning("Broadcaster notification failed for flag='%s': %s", proposed.name, e)
 
+        new_value = False if delete_requested else proposed.enabled
         audit_record = killswitch_pb2.AuditRecord(
             flag_name=proposed.name,
             old_value=old_enabled,
-            new_value=False,
+            new_value=new_value,
             changed_by=changed_by,
             changed_at=now,
             reason=reason,

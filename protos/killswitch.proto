@@ -2,16 +2,29 @@ syntax = "proto3";
 
 package killswitch;
 
+
+enum OperationType {
+    OPERATION_UNSPECIFIED = 0;
+    OPERATION_TOGGLE      = 1;
+    OPERATION_ADD         = 2;
+    OPERATION_EDIT        = 3;
+    OPERATION_DELETE      = 4;
+}
+
+
 message Flag {
     string name        = 1;
     bool   enabled     = 2;
     string description = 3;
+    bool   protected   = 4;
+    string mutex_with  = 5;
 }
 
 message FlagChangeRequest {
-    Flag   flag       = 1;
-    string changed_by = 2;
-    string reason     = 3;
+    Flag          flag           = 1;
+    string        changed_by     = 2;
+    string        reason         = 3;
+    OperationType operation_type = 4;
 }
 
 message FlagChangeResponse {
@@ -19,24 +32,51 @@ message FlagChangeResponse {
     string message = 2;
 }
 
+message FlagQuery {
+    string name = 1;
+}
+
+message FlagList {
+    repeated Flag flags = 1;
+}
+
+
 message PolicyRequest {
     Flag            current_flag    = 1;
     Flag            proposed_change = 2;
     string          changed_by      = 3;
-    repeated Flag   context_flags   = 4;  // untuk evaluasi mutex
+    repeated Flag   context_flags   = 4;
 }
 
 message PolicyResponse {
-    bool   approved       = 1;
-    string denial_reason  = 2;
+    bool   approved      = 1;
+    string denial_reason = 2;
 }
+
+message MutexPair {
+    string flag_a = 1;
+    string flag_b = 2;
+}
+
+message PolicyRules {
+    repeated string    protected_flags = 1;
+    repeated MutexPair mutex_pairs     = 2;
+}
+
+message PolicyRulesResponse {
+    bool   success = 1;
+    string message = 2;
+}
+
 
 message FlagUpdate {
     Flag   flag        = 1;
     string changed_by  = 2;
     int64  timestamp   = 3;
     string change_type = 4;
+    bool   old_value   = 5;
 }
+
 
 message AuditRecord {
     string flag_name     = 1;
@@ -51,21 +91,16 @@ message AuditRecord {
 message AuditQuery {
     string flag_name = 1;
     int32  limit     = 2;
+    int64  offset    = 3;
 }
 
 message AuditHistoryResponse {
     repeated AuditRecord records = 1;
 }
 
-message FlagQuery {
-    string name = 1;
-}
-
-message FlagList {
-    repeated Flag flags = 1;
-}
 
 message Empty {}
+
 
 service FlagStore {
     rpc SetFlag   (FlagChangeRequest) returns (FlagChangeResponse);
@@ -75,6 +110,8 @@ service FlagStore {
 
 service PolicyEvaluator {
     rpc ValidateChange (PolicyRequest) returns (PolicyResponse);
+    rpc GetPolicyRules (Empty)         returns (PolicyRules);
+    rpc SetPolicyRules (PolicyRules)   returns (PolicyRulesResponse);
 }
 
 service Broadcaster {
@@ -83,7 +120,7 @@ service Broadcaster {
 }
 
 service AuditLogger {
-    rpc LogChange     (AuditRecord)  returns (Empty);
-    rpc GetHistory    (AuditQuery)   returns (AuditHistoryResponse);
-    rpc StreamHistory (Empty)        returns (stream AuditRecord);
+    rpc LogChange     (AuditRecord) returns (Empty);
+    rpc GetHistory    (AuditQuery)  returns (AuditHistoryResponse);
+    rpc StreamHistory (AuditQuery)  returns (stream AuditRecord);
 }

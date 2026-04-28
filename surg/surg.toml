@@ -1,0 +1,20 @@
+[server]
+host     = "localhost"
+port     = 8080
+log_file = "logs/surg.log"
+
+[operator]
+name = "arkeian"
+
+[grus]
+executable = "grus"
+
+[grus.services]
+flag_store       = "localhost:50051"
+policy_evaluator = "localhost:50052"
+broadcaster      = "localhost:50053"
+audit_logger     = "localhost:50054"
+
+[behavior]
+idle_timeout_minutes     = 60
+shutdown_warning_seconds = 60

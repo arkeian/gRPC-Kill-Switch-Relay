@@ -2,6 +2,7 @@ import argparse
 import logging
 import os
 import sys
+import time
 
 
 def main():
@@ -43,10 +44,8 @@ def main():
         ],
     )
 
-    print("=" * 60)
-    print("  GRUS - Kill Switch Relay Control Center")
-    print(f"  Environment: {args.env}")
-    print("=" * 60)
+    print("GRUS - Kill Switch Relay Control Center")
+    print(f"Environment: {args.env}")
 
     print("\n[grus] Checking protobuf files...")
     check_and_regenerate(repo_root)
@@ -60,12 +59,11 @@ def main():
 
     prompt_and_seed(cfg, client)
 
-    print("\n[grus] Launching TUI...")
+    print("[grus] All services running headless. Press Ctrl+C to stop.\n")
 
     try:
-        from tui.app import GrusApp
-        app = GrusApp(cfg=cfg, grpc_client=client, process_manager=pm)
-        app.run()
+        while True:
+            time.sleep(1)
     except KeyboardInterrupt:
         pass
     finally:

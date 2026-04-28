@@ -56,6 +56,7 @@ class AuditLoggerServicer(killswitch_pb2_grpc.AuditLoggerServicer):
         rows = self._logger.get_history(
             flag_name=request.flag_name,
             limit=request.limit,
+            offset=request.offset,
         )
         records = [
             killswitch_pb2.AuditRecord(

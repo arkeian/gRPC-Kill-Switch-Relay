@@ -1,4 +1,5 @@
 import datetime
+import logging
 import os
 import threading
 
@@ -74,6 +75,60 @@ def _reload_rules_if_needed() -> None:
 
 
 _reload_rules_if_needed()
+
+
+def _persist_rules() -> None:
+    global _rules_mtime
+    if not _rules_path:
+        return
+    with _rules_lock:
+        protected = list(PROTECTED_FLAGS)
+        pairs = list(MUTEX_PAIRS)
+        mw_start, mw_end = MAINTENANCE_WINDOW_LOCAL
+        tz_offset = int(_TZ_JAKARTA.utcoffset(None).total_seconds() / 3600)
+    lines = []
+    items = ', '.join(f'"{f}"' for f in sorted(protected))
+    lines.append(f'protected_flags = [{items}]')
+    lines.append('')
+    for a, b in pairs:
+        lines.append('[[mutual_exclusion]]')
+        lines.append(f'flags = ["{a}", "{b}"]')
+        lines.append('')
+    lines.append('[maintenance_window]')
+    lines.append(f'start_hour = {mw_start}')
+    lines.append(f'end_hour = {mw_end}')
+    lines.append(f'timezone_offset = {tz_offset}')
+    try:
+        with open(_rules_path, 'w') as f:
+            f.write('\n'.join(lines) + '\n')
+        _rules_mtime = os.path.getmtime(_rules_path)
+    except OSError as e:
+        logging.getLogger(__name__).warning("Failed to persist policy rules: %s", e)
+
+
+def get_policy_rules() -> dict:
+    _reload_rules_if_needed()
+    with _rules_lock:
+        return {
+            'protected_flags': list(PROTECTED_FLAGS),
+            'mutex_pairs': list(MUTEX_PAIRS),
+        }
+
+
+def set_policy_rules(protected_flags: list, mutex_pairs: list) -> None:
+    global PROTECTED_FLAGS, MUTEX_PAIRS
+    with _rules_lock:
+        PROTECTED_FLAGS = set(str(f) for f in protected_flags)
+        MUTEX_PAIRS = [(str(a), str(b)) for a, b in mutex_pairs]
+    _persist_rules()
+
+
+def prune_flag(flag_name: str) -> None:
+    global PROTECTED_FLAGS, MUTEX_PAIRS
+    with _rules_lock:
+        PROTECTED_FLAGS.discard(flag_name)
+        MUTEX_PAIRS = [(a, b) for a, b in MUTEX_PAIRS if a != flag_name and b != flag_name]
+    _persist_rules()
 
 
 def validate_change(proposed_flag, context_flags):

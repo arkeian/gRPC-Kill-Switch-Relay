@@ -1,0 +1,67 @@
+@import "tailwindcss";
+
+:root {
+  --c-base: #0f1117;
+  --c-panel: #1a1d27;
+  --c-muted: #2a2d3a;
+  --c-hover: #363944;
+  --c-border: #2a2d3a;
+  --c-row: rgba(42, 45, 58, 0.2);
+  --c-row-border: rgba(42, 45, 58, 0.5);
+  --c-t1: #e2e8f0;
+  --c-t2: #64748b;
+  --c-t3: #94a3b8;
+  --c-inp: #0f1117;
+  --c-warn-bg: rgba(234, 179, 8, 0.25);
+  --c-warn-border: rgba(234, 179, 8, 0.6);
+  --c-warn-text: #fbbf24;
+  --c-info-bg: rgba(99, 102, 241, 0.22);
+  --c-info-border: rgba(99, 102, 241, 0.6);
+  --c-info-text: #c7d2fe;
+}
+
+[data-theme="light"] {
+  --c-base: #f1f5f9;
+  --c-panel: #ffffff;
+  --c-muted: #e2e8f0;
+  --c-hover: #cbd5e1;
+  --c-border: #e2e8f0;
+  --c-row: rgba(226, 232, 240, 0.4);
+  --c-row-border: rgba(203, 213, 225, 0.8);
+  --c-t1: #0f172a;
+  --c-t2: #64748b;
+  --c-t3: #64748b;
+  --c-inp: #f8fafc;
+  --c-warn-bg: rgba(234, 179, 8, 0.35);
+  --c-warn-border: rgba(234, 179, 8, 0.8);
+  --c-warn-text: #92400e;
+  --c-info-bg: rgba(37, 99, 235, 0.2);
+  --c-info-border: rgba(37, 99, 235, 0.6);
+  --c-info-text: #1d4ed8;
+}
+
+body {
+  margin: 0;
+  background: var(--c-base);
+  color: var(--c-t1);
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  font-size: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--c-muted);
+  border-radius: 3px;
+}

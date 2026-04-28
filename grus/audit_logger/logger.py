@@ -63,7 +63,7 @@ class AuditLogger:
         for q in subscribers:
             q.put(record)
 
-    def get_history(self, flag_name='', limit=0):
+    def get_history(self, flag_name='', limit=0, offset=0):
         query = 'SELECT flag_name, old_value, new_value, changed_by, changed_at, reason, policy_result FROM audit'
         params = []
 
@@ -76,6 +76,10 @@ class AuditLogger:
         if limit > 0:
             query += ' LIMIT ?'
             params.append(limit)
+
+        if offset > 0:
+            query += ' OFFSET ?'
+            params.append(offset)
 
         with self._lock:
             cursor = self._conn.execute(query, params)

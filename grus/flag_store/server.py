@@ -71,20 +71,43 @@ class FlagStoreServicer(killswitch_pb2_grpc.FlagStoreServicer):
             log.info("SetFlag result: success=False message='%s'", message)
         return killswitch_pb2.FlagChangeResponse(success=success, message=message)
 
+    def _fetch_policy_maps(self):
+        try:
+            rules = self._policy_stub.GetPolicyRules(killswitch_pb2.Empty())
+            protected_set = set(rules.protected_flags)
+            mutex_map = {}
+            for pair in rules.mutex_pairs:
+                mutex_map[pair.flag_a] = pair.flag_b
+                mutex_map[pair.flag_b] = pair.flag_a
+            return protected_set, mutex_map
+        except Exception as e:
+            log.warning("GetPolicyRules failed, returning empty policy maps: %s", e)
+            return set(), {}
+
     def GetFlag(self, request, context):
         row = self._store.get_flag(request.name)
         if row is None:
             context.abort(grpc.StatusCode.NOT_FOUND, f"Flag '{request.name}' not found")
+        protected_set, mutex_map = self._fetch_policy_maps()
         return killswitch_pb2.Flag(
             name=row['name'],
             enabled=row['enabled'],
             description=row['description'],
+            protected=row['name'] in protected_set,
+            mutex_with=mutex_map.get(row['name'], ''),
         )
 
     def ListFlags(self, request, context):
         rows = self._store.list_flags()
+        protected_set, mutex_map = self._fetch_policy_maps()
         flags = [
-            killswitch_pb2.Flag(name=r['name'], enabled=r['enabled'], description=r['description'])
+            killswitch_pb2.Flag(
+                name=r['name'],
+                enabled=r['enabled'],
+                description=r['description'],
+                protected=r['name'] in protected_set,
+                mutex_with=mutex_map.get(r['name'], ''),
+            )
             for r in rows
         ]
         return killswitch_pb2.FlagList(flags=flags)
