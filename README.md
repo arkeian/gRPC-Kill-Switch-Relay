@@ -65,15 +65,20 @@ Grus dan Surg berjalan sepenuhnya di infrastruktur Anda. Tidak ada data flag, ti
 Operator (via Surg)
        │
        ▼
-  FlagStore ──► PolicyEvaluator (validasi)
-       │              │
-       │         DITOLAK → kembalikan error, tidak ada tulis
+  FlagStore
        │
-   DISETUJUI
+       ▼
+  PolicyEvaluator (validasi)
        │
-       ├──► SQLite (simpan)
-       ├──► Broadcaster ──► semua subscriber (sub-detik)
-       └──► AuditLogger ──► SQLite audit (persisten)
+   ┌───┴───────────────┐
+   │                   │
+DITOLAK            DISETUJUI
+   │                   │
+   │             ├──► SQLite (simpan)
+   │             ├──► Broadcaster ──► semua subscriber (sub-detik)
+   │             └──► AuditLogger ──► SQLite audit (persisten)
+   │
+   └──► kembalikan error (tidak ada tulis)
 ```
 
 ---
