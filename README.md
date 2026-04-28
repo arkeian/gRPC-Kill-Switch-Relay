@@ -1,269 +1,220 @@
-# Grus - Kill Switch Relay Engine | Surg - Kill Switch Relay UI
+# Grus × Surg — Kill Switch Relay
 
-## Anggota
+## Tim
 
 | Nama | NRP |
 |------|-----|
 | Ahmad Wildan Fawwaz | 5027241001 |
 | Muhammad Rakha Hananditya R. | 5027241015 |
 
-## Gambaran Umum
+---
 
-Grus adalah sistem flag operasional real-time berbasis gRPC untuk komunikasi antar layanan infrastruktur. Sistem ini menyediakan kill switch, circuit breaker, dan mode switch yang dapat diubah saat runtime. Setiap perubahan flag divalidasi oleh kebijakan, disiarkan ke subscriber secara real-time, dan dicatat dalam audit trail.
+## Apa Ini?
 
-Surg adalah UI wrapper untuk engine Grus yang berbasis Socket.io.
+**Grus** adalah engine feature flag real-time berbasis gRPC. Ia bertindak sebagai satu-satunya sumber kebenaran untuk seluruh status flag di sistem Anda — mulai dari kill switch darurat, circuit breaker, hingga mode eksperimen yang dapat diaktifkan dan dimatikan tanpa deploy ulang.
 
-## Arsitektur
+**Surg** adalah UI wrapper berbasis web untuk Grus. Buka browser, lihat seluruh flag sistem secara live, ubah status dalam satu klik, dan pantau setiap perubahan yang terjadi secara real-time.
 
-| Layanan | Port | Peran |
-|---------|------|-------|
-| Flag Store | 50051 | Sumber kebenaran untuk seluruh status flag. Mengorkestrasi alur perubahan. |
-| Policy Evaluator | 50052 | Gatekeeper stateless. Memvalidasi perubahan terhadap aturan sebelum disimpan. |
-| Broadcaster | 50053 | Mengelola stream subscriber dan mendistribusikan perubahan flag secara real-time. |
-| Audit Logger | 50054 | Mencatat setiap perubahan flag ke SQLite dan menyediakan query serta stream langsung. |
+---
 
-### Tabel RPC
+## Mengapa Grus?
 
-| RPC | Layanan | Tipe | Deskripsi |
-|-----|---------|------|-----------|
-| `SetFlag` | Flag Store | Unary | Mengubah flag. Memicu alur: validasi → simpan → broadcast → audit. |
-| `GetFlag` | Flag Store | Unary | Membaca status satu flag. |
-| `ListFlags` | Flag Store | Unary | Mengembalikan semua flag. |
-| `ValidateChange` | Policy Evaluator | Unary | Mengevaluasi perubahan terhadap aturan kebijakan. |
-| `SubscribeFlags` | Broadcaster | Server-streaming | Menerima update flag secara real-time. |
-| `NotifyChange` | Broadcaster | Unary | Dipanggil Flag Store untuk mendistribusikan update. |
-| `LogChange` | Audit Logger | Unary | Menyimpan catatan perubahan. |
-| `GetHistory` | Audit Logger | Unary | Mengambil riwayat audit. |
-| `StreamHistory` | Audit Logger | Server-streaming | Menerima catatan audit secara real-time. |
+Kebanyakan sistem manajemen flag bekerja dengan cara yang sama: klien melakukan polling ke server secara berkala untuk mengecek apakah ada perubahan. Artinya ada *jeda* antara perubahan dibuat dan efeknya dirasakan — bisa 30 detik, bisa 5 menit, tergantung interval polling.
 
-### Alur Kerja
+Grus bekerja secara berbeda.
 
-1. Pengguna mengirim `SetFlag` ke Flag Store.
-2. Flag Store membaca status flag saat ini dan seluruh flag dari SQLite.
-3. Flag Store memanggil `PolicyEvaluator.ValidateChange` dengan konteks seluruh flag.
-4. Jika ditolak: langsung mengembalikan error. Tidak ada data yang ditulis.
-5. Jika disetujui: Flag Store menulis ke SQLite (upsert).
-6. Flag Store memanggil `Broadcaster.NotifyChange` untuk distribusi ke subscriber.
-7. Flag Store memanggil `AuditLogger.LogChange` untuk pencatatan.
-8. Flag Store mengembalikan respons sukses.
+### Propagasi Sub-Detik via gRPC Streaming
+
+Setiap perubahan flag dikirimkan ke seluruh subscriber secara langsung menggunakan server-streaming gRPC — bukan polling. Saat Anda mengubah flag di Surg, seluruh sistem yang berlangganan menerima perubahan tersebut dalam hitungan milidetik.
+
+### Validasi Kebijakan Sebelum Perubahan Tersimpan
+
+Setiap mutasi melewati lapisan `PolicyEvaluator` sebelum data apa pun ditulis. Ini bukan validasi di sisi klien — ini enforcement di tingkat engine. Flag dapat dikonfigurasi sebagai:
+
+- **Protected** — tidak dapat dinonaktifkan, bahkan oleh operator. Cocok untuk flag yang menjaga ketersediaan sistem kritis.
+- **Mutex** — dua flag tidak dapat aktif bersamaan. Jika flag A dinyalakan, flag B dimatikan secara otomatis, dan sebaliknya.
+
+Penolakan dikembalikan sebelum SQLite disentuh. Tidak ada setengah-perubahan, tidak ada state yang tidak konsisten.
+
+### Audit Trail yang Tidak Dapat Dihilangkan
+
+Setiap perubahan — siapa, apa, kapan, mengapa, dan apakah disetujui oleh kebijakan — dicatat ke SQLite melalui `AuditLogger` yang berjalan sebagai layanan terpisah. Ini bukan log aplikasi biasa yang bisa terhapus saat container di-restart. Audit berjalan independen dari engine utama.
+
+### Arsitektur Microservices, Bukan Monolith Tersembunyi
+
+Grus terdiri dari empat layanan gRPC yang terpisah dengan tanggung jawab yang jelas:
+
+| Layanan | Port | Tanggung Jawab |
+|---------|------|----------------|
+| FlagStore | 50051 | Sumber kebenaran. Mengorkestrasi seluruh alur perubahan. |
+| PolicyEvaluator | 50052 | Gatekeeper stateless. Memvalidasi setiap perubahan terhadap aturan. |
+| Broadcaster | 50053 | Fan-out pub/sub. Mendistribusikan update ke seluruh subscriber secara real-time. |
+| AuditLogger | 50054 | Pencatatan persisten. Merekam setiap perubahan ke SQLite. |
+
+Setiap layanan dapat dimonitor, di-scale, dan di-restart secara independen.
+
+### Self-Hosted, Data Tidak Keluar
+
+Grus dan Surg berjalan sepenuhnya di infrastruktur Anda. Tidak ada data flag, tidak ada audit history, tidak ada konfigurasi kebijakan yang dikirim ke server eksternal.
+
+---
+
+## Alur Perubahan Flag
+
+```
+Operator (via Surg)
+       │
+       ▼
+  FlagStore ──► PolicyEvaluator (validasi)
+       │              │
+       │         DITOLAK → kembalikan error, tidak ada tulis
+       │
+   DISETUJUI
+       │
+       ├──► SQLite (simpan)
+       ├──► Broadcaster ──► semua subscriber (sub-detik)
+       └──► AuditLogger ──► SQLite audit (persisten)
+```
+
+---
 
 ## Prasyarat
 
-- Python 3.10+
+- Python 3.10 atau lebih baru
 - pip
 
-## Cara Menjalankan
+---
 
-### Opsi 1: Grus TUI (Direkomendasikan)
+## Instalasi
 
-Grus TUI menjalankan seluruh sistem dalam satu perintah — otomatis memulai keempat layanan, menyediakan antarmuka interaktif, dan menangani shutdown.
-
-**1. Clone dan masuk ke proyek:**
+**1. Clone repositori:**
 ```bash
 git clone <repo-url>
 cd gRPC-Kill-Switch-Relay
 ```
 
-**2. Install dependensi dan Grus:**
+**2. Buat virtual environment:**
 ```bash
-pip install -e .
+python -m venv .venv
+source .venv/bin/activate   # Linux/macOS
+# atau: .venv\Scripts\activate  (Windows)
 ```
 
-**3. Jalankan Grus:**
+**3. Install Grus dan Surg:**
+```bash
+pip install -e grus/
+pip install -e surg/
+```
+
+---
+
+## Cara Menjalankan
+
+### Menjalankan dengan Surg (Direkomendasikan)
+
+Surg secara otomatis mendeteksi apakah Grus sudah berjalan. Jika belum, ia akan memulai Grus terlebih dahulu, lalu membuka UI di browser.
+
+```bash
+surg
+```
+
+Buka `http://localhost:8080` di browser. Saat pertama kali dijalankan, Anda akan diminta memasukkan nama operator.
+
+### Menjalankan Grus Saja (Tanpa UI)
+
 ```bash
 grus
 ```
 
-Saat pertama kali dijalankan, Grus akan:
-- Memeriksa dan me-regenerasi file protobuf jika diperlukan
-- Memulai keempat layanan gRPC
-- Menanyakan apakah ingin memuat data demo (5 flag contoh)
-- Meluncurkan TUI interaktif
+Grus akan menjalankan keempat layanan gRPC secara headless dan menunggu hingga Ctrl+C.
 
-**Pilihan environment:**
+### Opsi Environment
+
 ```bash
-grus --env=dev    # default, logging INFO
-grus --env=demo   # logging DEBUG, timeout lebih panjang
+grus --env=dev    # default — logging INFO
 grus --env=prod   # logging WARNING, tanpa prompt seed data
 ```
 
-### Opsi 2: Manual (Tanpa TUI)
-
-**1. Generate protobuf:**
-```bash
-bash scripts/generate_protos.sh
-```
-
-**2. Jalankan semua layanan:**
-```bash
-bash scripts/run_all.sh
-```
-
-**3. Hentikan layanan:** Tekan `Ctrl+C`.
-
-## Panduan TUI
-
-### Navigasi Tab
-
-| Tombol | Fungsi |
-|--------|--------|
-| `1` | Tab Flag Management |
-| `2` | Tab Live Stream |
-| `3` | Tab Audit History |
-| `4` | Tab Policy Testing |
-| `5` | Tab System Logs |
-| `Q` | Keluar (shutdown semua layanan) |
-| `?` | Tampilkan bantuan shortcut |
-
-### Tab 1: Flag Management
-
-Menampilkan seluruh flag beserta status (ON/OFF), badge protected, dan indikator mutex.
-
-| Tombol | Fungsi |
-|--------|--------|
-| `T` | Toggle flag (enable/disable) |
-| `A` | Tambah flag baru |
-| `E` | Edit flag (ubah deskripsi dan status) |
-| `D` | Hapus flag |
-| `I` | Lihat detail flag |
-| `R` | Refresh daftar |
-| `X` | Ekspor ke JSON |
-
-### Tab 2: Live Stream Monitor
-
-Menampilkan output real-time dari `SubscribeFlags` — setiap perubahan flag muncul langsung.
-
-| Tombol | Fungsi |
-|--------|--------|
-| `P` | Pause/Resume |
-| `C` | Bersihkan log |
-| `F` | Filter berdasarkan nama flag |
-| `S` | Cari teks |
-
-Perubahan flag ditampilkan dengan tipe berikut:
-- **ENABLED** (hijau) - Flag diaktifkan
-- **UPDATED** (biru) - Flag diubah (deskripsi atau status via Edit)
-- **DISABLED** (merah) - Flag dinonaktifkan
-- **DELETED** (merah terang) - Flag dihapus
-
-
-Tabel riwayat audit dengan paginasi.
-
-| Tombol | Fungsi |
-|--------|--------|
-| `R` | Refresh |
-| `F` | Filter berdasarkan nama flag |
-| `N` / `P` | Halaman berikutnya / sebelumnya |
-| `X` | Ekspor ke CSV |
-
-### Tab 4: Policy Testing
-
-Form untuk menguji validasi kebijakan secara dry-run (tidak mengubah flag).
-
-Pilih flag, pilih state yang diajukan, isi `changed_by`, lalu tekan tombol Validate. Hasil ditampilkan langsung: APPROVED (hijau) atau DENIED (merah) beserta alasan.
-
-### Tab 5: System Logs
-
-Menampilkan log gabungan dari seluruh layanan dengan warna berbeda per layanan:
-- Flag Store: Biru
-- Policy Evaluator: Hijau
-- Broadcaster: Kuning
-- Audit Logger: Magenta
-- Grus: Cyan
-
-| Tombol | Fungsi |
-|--------|--------|
-| `P` | Pause/Resume |
-| `C` | Bersihkan log |
-| `S` | Cari teks |
+---
 
 ## Konfigurasi
 
-### File Konfigurasi
+### Surg (`surg/surg.toml`)
 
-| File | Fungsi |
-|------|--------|
-| `config/dev.toml` | Konfigurasi environment development |
-| `config/demo.toml` | Konfigurasi environment demo |
-| `config/prod.toml` | Konfigurasi environment production |
-| `config/policy_rules.toml` | Aturan kebijakan (protected flags, mutex, maintenance window) |
-| `config/seed_flags.toml` | Data flag demo untuk first-run |
-
-### Aturan Kebijakan (`config/policy_rules.toml`)
-
-**Protected flags** - Flag yang tidak dapat dinonaktifkan:
 ```toml
-protected_flags = ["payment-fallback"]
+[server]
+host = "localhost"
+port = 8080
+
+[operator]
+name = "nama-anda"          # diisi otomatis saat pertama kali dijalankan
+
+[grus]
+executable = "grus"         # path ke binary grus
+
+[behavior]
+idle_timeout_minutes = 60   # Surg dan Grus berhenti otomatis setelah idle; 0 = nonaktif
 ```
 
-**Mutual exclusion** - Pasangan flag yang tidak dapat aktif bersamaan:
+### Aturan Kebijakan (`grus/config/policy_rules.toml`)
+
 ```toml
+# Flag yang tidak dapat dinonaktifkan
+protected_flags = ["payment-fallback"]
+
+# Pasangan flag yang tidak dapat aktif bersamaan
 [[mutual_exclusion]]
 flags = ["cache-only-mode", "disable-cache-refresh"]
-```
 
-**Maintenance window** - Semua perubahan diblokir dalam jendela waktu:
-```toml
+# Semua perubahan diblokir dalam jendela waktu ini
 [maintenance_window]
 start_hour = 2
 end_hour = 4
 timezone_offset = 7
 ```
 
-## Menjalankan Test
+---
+
+## Menjalankan Test Integrasi
 
 ```bash
-PYTHONPATH="$(pwd)" python tests/integration_test.py
+source .venv/bin/activate
+PYTHONPATH="$(pwd)" python grus/tests/integration_test.py
 ```
 
-Test ini menjalankan keempat layanan sebagai subprocess, menguji 4 skenario (propagasi, policy denial, audit, multi-flag stream), lalu mematikan layanan.
+Test ini memulai keempat layanan sebagai subprocess, menguji propagasi flag, penolakan kebijakan, pencatatan audit, dan multi-flag streaming, lalu mematikan semua layanan.
+
+---
 
 ## Struktur Proyek
 
 ```
 gRPC-Kill-Switch-Relay/
+├── grus/                    ← Engine gRPC
+│   ├── flag_store/          ← FlagStore service (port 50051)
+│   ├── policy_evaluator/    ← PolicyEvaluator service (port 50052)
+│   ├── broadcaster/         ← Broadcaster service (port 50053)
+│   ├── audit_logger/        ← AuditLogger service (port 50054)
+│   ├── tui/                 ← TUI (dipertahankan, tidak aktif)
+│   ├── config/              ← TOML configs (policy_rules, env)
+│   ├── data/                ← SQLite databases
+│   ├── logs/
+│   ├── tests/
+│   └── setup.py
+├── surg/                    ← UI Wrapper
+│   ├── main.py              ← Entry point, lifecycle Grus
+│   ├── socket_server.py     ← Socket.io handlers, gRPC bridge
+│   ├── streams.py           ← Background streams + idle timer
+│   ├── grpc_client.py       ← Async gRPC client
+│   ├── config.py            ← Loader surg.toml
+│   ├── surg.toml            ← Konfigurasi Surg
+│   ├── frontend/            ← Source React (TypeScript + Vite + Tailwind)
+│   ├── dist/                ← Build React siap pakai
+│   └── setup.py
 ├── protos/
-│   └── killswitch.proto
+│   └── killswitch.proto     ← Definisi seluruh RPC dan message
 ├── generated/
 │   ├── killswitch_pb2.py
 │   └── killswitch_pb2_grpc.py
-├── flag_store/
-│   ├── server.py
-│   └── store.py
-├── policy_evaluator/
-│   ├── server.py
-│   └── engine.py
-├── broadcaster/
-│   ├── server.py
-│   └── subscriber_manager.py
-├── audit_logger/
-│   ├── server.py
-│   └── logger.py
-├── grus/
-│   ├── main.py
-│   ├── app.py
-│   ├── config.py
-│   ├── grpc_client.py
-│   ├── process_manager.py
-│   ├── proto_check.py
-│   ├── seed.py
-│   └── tabs/
-│       ├── flag_management.py
-│       ├── live_stream.py
-│       ├── audit_history.py
-│       ├── policy_testing.py
-│       └── system_logs.py
-├── config/
-│   ├── dev.toml
-│   ├── demo.toml
-│   ├── prod.toml
-│   ├── policy_rules.toml
-│   └── seed_flags.toml
-├── data/
-├── scripts/
-│   ├── generate_protos.sh
-│   └── run_all.sh
-├── tests/
-│   └── integration_test.py
-└── setup.py
+└── assets/                  ← Logo dan brand assets
 ```

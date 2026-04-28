@@ -22,8 +22,12 @@ export default function App() {
 
   function closePanel(id: PanelId) {
     setVisible(prev => { const s = new Set(prev); s.delete(id); return s; });
+    if (id === 'events') actions.setEventLogActive(false);
   }
-  function resetLayout() { setVisible(new Set(ALL_PANELS)); }
+  function resetLayout() {
+    setVisible(new Set(ALL_PANELS));
+    actions.setEventLogActive(true);
+  }
 
   const showFlags = visible.has('flags');
   const showEvents = visible.has('events');
@@ -44,7 +48,7 @@ export default function App() {
       <div className="flex-1 overflow-hidden flex flex-col p-3 gap-3 min-h-0">
         {visible.size === 0 ? (
           <div className="flex flex-col items-center justify-center flex-1 text-(--c-t2) gap-3">
-            <img src={markSrc} alt="Surg" className="w-12 opacity-30" />
+            <img src={markSrc} alt="Surg" className="w-24 opacity-30" />
             <p className="text-sm">All panels closed.</p>
             <button
               onClick={resetLayout}

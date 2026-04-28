@@ -11,6 +11,7 @@ interface Props {
 interface ModalState {
   mode: 'edit' | 'delete' | 'policy' | null;
   flag: Flag | null;
+  isNew: boolean;
 }
 
 function Toggle({ enabled, onChange }: { enabled: boolean; onChange: () => void }) {
@@ -25,9 +26,10 @@ function Toggle({ enabled, onChange }: { enabled: boolean; onChange: () => void 
 }
 
 export default function FlagTable({ flags, actions, onClose }: Props) {
-  const [modal, setModal] = useState<ModalState>({ mode: null, flag: null });
+  const [modal, setModal] = useState<ModalState>({ mode: null, flag: null, isNew: false });
   const [feedback, setFeedback] = useState<string | null>(null);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [menuDir, setMenuDir] = useState<'down' | 'up'>('down');
   const [mutexConfirm, setMutexConfirm] = useState<{ flag: Flag; other: Flag } | null>(null);
 
   useEffect(() => {
@@ -37,10 +39,10 @@ export default function FlagTable({ flags, actions, onClose }: Props) {
     return () => document.removeEventListener('click', close);
   }, [openMenu]);
 
-  function openEdit(f: Flag) { setModal({ mode: 'edit', flag: { ...f } }); }
-  function openDelete(f: Flag) { setModal({ mode: 'delete', flag: { ...f } }); }
-  function openPolicy(f: Flag) { setModal({ mode: 'policy', flag: { ...f } }); }
-  function closeModal() { setModal({ mode: null, flag: null }); }
+  function openEdit(f: Flag) { setModal({ mode: 'edit', flag: { ...f }, isNew: false }); }
+  function openDelete(f: Flag) { setModal({ mode: 'delete', flag: { ...f }, isNew: false }); }
+  function openPolicy(f: Flag) { setModal({ mode: 'policy', flag: { ...f }, isNew: false }); }
+  function closeModal() { setModal({ mode: null, flag: null, isNew: false }); }
 
   async function performToggle(f: Flag, nextEnabled: boolean) {
     const res = await actions.toggleFlag(f.name, nextEnabled);
@@ -61,15 +63,20 @@ export default function FlagTable({ flags, actions, onClose }: Props) {
   }
 
   function handleAdd() {
-    setModal({ mode: 'edit', flag: { name: '', enabled: false, description: '', protected: false, mutex_with: '' } });
+    setModal({ mode: 'edit', flag: { name: '', enabled: false, description: '', protected: false, mutex_with: '' }, isNew: true });
   }
 
   async function submitEdit(f: Flag, isNew: boolean) {
     const res = isNew
       ? await actions.addFlag(f.name, f.description, f.enabled)
       : await actions.editFlag(f.name, f.description, f.enabled);
-    if (res.success) { closeModal(); try { await actions.refreshFlags(); } catch { } }
-    else { setFeedback(res.message); }
+    if (res.success) {
+      if (isNew && (f.protected || f.mutex_with)) {
+        await actions.setFlagPolicy(f.name, f.protected, f.mutex_with).catch(() => {});
+      }
+      closeModal();
+      try { await actions.refreshFlags(); } catch { }
+    } else { setFeedback(res.message); }
   }
 
   async function submitDelete(f: Flag) {
@@ -91,7 +98,7 @@ export default function FlagTable({ flags, actions, onClose }: Props) {
     await performToggle(flag, true);
   }
 
-  const isNew = modal.mode === 'edit' && modal.flag?.name === '';
+  const isNew = modal.isNew;
 
   return (
     <div className="flex flex-col h-full bg-(--c-panel) border border-(--c-border) rounded-lg overflow-hidden">
@@ -156,14 +163,21 @@ export default function FlagTable({ flags, actions, onClose }: Props) {
                 <td className="px-4 py-2.5 text-right">
                   <div className="relative inline-block">
                     <button
-                      onClick={e => { e.stopPropagation(); setOpenMenu(openMenu === f.name ? null : f.name); }}
+                      onClick={e => {
+                        e.stopPropagation();
+                        if (openMenu !== f.name) {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setMenuDir(window.innerHeight - rect.bottom < 140 ? 'up' : 'down');
+                        }
+                        setOpenMenu(openMenu === f.name ? null : f.name);
+                      }}
                       className="w-7 h-7 flex items-center justify-center rounded text-(--c-t2) hover:text-(--c-t1) hover:bg-(--c-muted) transition-colors text-lg leading-none"
                       title="Actions"
                     >
                       ⋮
                     </button>
                     {openMenu === f.name && (
-                      <div className="absolute right-0 top-8 z-20 min-w-[120px] bg-(--c-panel) border border-(--c-border) rounded-lg shadow-xl overflow-hidden">
+                      <div className={`absolute right-0 z-20 min-w-30 bg-(--c-panel) border border-(--c-border) rounded-lg shadow-xl overflow-hidden ${menuDir === 'up' ? 'bottom-8' : 'top-8'}`}>
                         <button
                           onClick={() => { openEdit(f); setOpenMenu(null); }}
                           className="w-full text-left px-3 py-2 text-sm text-(--c-t1) hover:bg-(--c-muted) transition-colors"
@@ -296,6 +310,34 @@ function EditForm({ flag, isNew, onChange, onSubmit, onCancel }: {
             <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${flag.enabled ? 'translate-x-5' : 'translate-x-0'}`} />
           </button>
         </div>
+        {isNew && (
+          <>
+            <div className="border-t border-(--c-border) pt-3 mt-1">
+              <p className="text-xs text-(--c-t2) mb-3 uppercase tracking-wider font-medium">Policy</p>
+              <div className="flex items-center gap-3 mb-3">
+                <button
+                  onClick={() => onChange({ ...flag, protected: !flag.protected })}
+                  className={`relative inline-flex items-center h-6 w-11 shrink-0 cursor-pointer rounded-full p-0.5 transition-colors ${flag.protected ? 'bg-[#eab308]' : 'bg-(--c-muted)'}`}
+                >
+                  <span className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${flag.protected ? 'translate-x-5' : 'translate-x-0'}`} />
+                </button>
+                <label className="text-sm text-(--c-t1)">Protected <span className="text-(--c-t2) text-xs">(cannot be disabled)</span></label>
+              </div>
+              <div>
+                <label className="block text-xs text-(--c-t2) mb-1">Mutually exclusive with <span className="text-(--c-t3)">(flag name, or leave blank)</span></label>
+                <input
+                  value={flag.mutex_with}
+                  onChange={e => onChange({ ...flag, mutex_with: e.target.value })}
+                  className="w-full bg-(--c-inp) border border-(--c-border) rounded px-3 py-1.5 text-sm text-(--c-t1) focus:outline-none focus:border-[#6366f1]"
+                  placeholder="other-flag-name"
+                />
+                {flag.mutex_with && (
+                  <p className="mt-1.5 text-[11px] text-(--c-info-text)">When this flag is ON, <strong>{flag.mutex_with}</strong> will be forced OFF, and vice versa.</p>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </div>
       <div className="flex justify-end gap-2 mt-4">
         <button onClick={onCancel} className="px-4 py-1.5 text-sm rounded bg-(--c-muted) text-(--c-t1) hover:bg-(--c-hover)">Cancel</button>
@@ -335,7 +377,7 @@ function PolicyForm({ flag, onChange, onSubmit, onCancel }: {
             placeholder="other-flag-name"
           />
           {flag.mutex_with && (
-            <p className="mt-1.5 text-[11px] text-[#a5b4fc]">When this flag is ON, <strong>{flag.mutex_with}</strong> will be forced OFF, and vice versa.</p>
+            <p className="mt-1.5 text-[11px] text-(--c-info-text)">When this flag is ON, <strong>{flag.mutex_with}</strong> will be forced OFF, and vice versa.</p>
           )}
         </div>
       </div>

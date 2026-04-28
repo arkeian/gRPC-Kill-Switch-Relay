@@ -1,10 +1,10 @@
-protected_flags = ["payment-fallback"]
+protected_flags = ["payment-fallback", "qris-payment"]
 
 [[mutual_exclusion]]
 flags = ["cache-only-mode", "disable-cache-refresh"]
 
 [[mutual_exclusion]]
-flags = ["tes-terserah", "disable-recommendations"]
+flags = ["card-payment", "qris-payment"]
 
 [maintenance_window]
 start_hour = 2

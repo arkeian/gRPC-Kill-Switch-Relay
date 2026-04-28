@@ -47,7 +47,7 @@ export default function Header({ grusStatus, connected, visiblePanels, onResetLa
   return (
     <header className="flex items-center justify-between px-5 py-3 border-b border-(--c-border) bg-(--c-panel) shrink-0">
       <div className="flex items-center gap-3">
-        <img src={logoSrc} alt="Surg" className="h-[42px] object-contain" />
+        <img src={logoSrc} alt="Surg" className="h-[63px] object-contain" />
       </div>
 
       <div className="flex items-center gap-4">

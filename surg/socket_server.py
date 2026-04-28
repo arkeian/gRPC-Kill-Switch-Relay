@@ -182,6 +182,32 @@ async def disconnect(sid):
     await _state['idle_tracker'].on_disconnect()
 
 
+async def _audit_denied(gc, flag_name: str, old_value: bool, new_value: bool, denial: str):
+    now = int(time.time())
+    record = killswitch_pb2.AuditRecord(
+        flag_name=flag_name,
+        old_value=old_value,
+        new_value=new_value,
+        changed_by=_op(),
+        changed_at=now,
+        reason=denial,
+        policy_result='denied',
+    )
+    try:
+        await _retry(lambda: gc.audit.LogChange(record))
+    except Exception as e:
+        log.warning("Failed to audit denied attempt for %s: %s", flag_name, e)
+    await sio.emit('audit_record', {
+        'flag_name':     flag_name,
+        'old_value':     old_value,
+        'new_value':     new_value,
+        'changed_by':    _op(),
+        'changed_at':    now,
+        'reason':        denial,
+        'policy_result': 'denied',
+    })
+
+
 # ── mutations ─────────────────────────────────────────────────────────────────
 
 @sio.event
@@ -224,6 +250,7 @@ async def toggle_flag(sid, data):
         ]
         approved, denial = await _auto_validate(gc, current, proposed, context_override)
         if not approved:
+            await _audit_denied(gc, name, current.enabled, proposed.enabled, denial)
             return {'success': False, 'message': denial}
         disable_reason = reason or f"Auto-disabled due to mutex with {name}"
         try:
@@ -244,6 +271,7 @@ async def toggle_flag(sid, data):
         context = context_override
     approved, denial = await _auto_validate(gc, current, proposed, context)
     if not approved:
+        await _audit_denied(gc, name, current.enabled, proposed.enabled, denial)
         return {'success': False, 'message': denial}
     try:
         resp = await _retry(lambda: gc.flag_store.SetFlag(killswitch_pb2.FlagChangeRequest(
@@ -278,6 +306,7 @@ async def add_flag(sid, data):
     current  = killswitch_pb2.Flag(name=name, enabled=False, description='')
     approved, denial = await _auto_validate(gc, current, proposed)
     if not approved:
+        await _audit_denied(gc, name, False, proposed.enabled, denial)
         return {'success': False, 'message': denial}
     try:
         resp = await _retry(lambda: gc.flag_store.SetFlag(killswitch_pb2.FlagChangeRequest(
@@ -321,6 +350,7 @@ async def edit_flag(sid, data):
     )
     approved, denial = await _auto_validate(gc, current, proposed)
     if not approved:
+        await _audit_denied(gc, name, current.enabled, proposed.enabled, denial)
         return {'success': False, 'message': denial}
     try:
         resp = await _retry(lambda: gc.flag_store.SetFlag(killswitch_pb2.FlagChangeRequest(
@@ -362,6 +392,7 @@ async def delete_flag(sid, data):
     )
     approved, denial = await _auto_validate(gc, current, proposed)
     if not approved:
+        await _audit_denied(gc, name, current.enabled, False, denial)
         return {'success': False, 'message': denial}
     try:
         resp = await _retry(lambda: gc.flag_store.SetFlag(killswitch_pb2.FlagChangeRequest(
@@ -380,6 +411,24 @@ async def delete_flag(sid, data):
                 'timestamp':   int(time.time()),
                 'change_type': 'DELETED',
             })
+            try:
+                current_rules = await _retry(lambda: gc.policy.GetPolicyRules(killswitch_pb2.Empty()))
+                protected_set = set(current_rules.protected_flags)
+                protected_set.discard(name)
+                pairs = [(p.flag_a, p.flag_b) for p in current_rules.mutex_pairs
+                         if p.flag_a != name and p.flag_b != name]
+                new_rules = killswitch_pb2.PolicyRules(
+                    protected_flags=list(protected_set),
+                    mutex_pairs=[killswitch_pb2.MutexPair(flag_a=a, flag_b=b) for a, b in pairs],
+                )
+                rule_resp = await _retry(lambda: gc.policy.SetPolicyRules(new_rules))
+                if rule_resp.success:
+                    await sio.emit('policy_update', {
+                        'protected_flags': list(protected_set),
+                        'mutex_pairs': [{'flag_a': a, 'flag_b': b} for a, b in pairs],
+                    })
+            except Exception as pe:
+                log.warning("Failed to prune policy for deleted flag %s: %s", name, pe)
         return {'success': resp.success, 'message': resp.message}
     except Exception as e:
         return {'success': False, 'message': str(e)}

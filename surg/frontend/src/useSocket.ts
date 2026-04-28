@@ -22,6 +22,7 @@ export interface SocketActions {
   getAuditHistory: (opts: { flag_name?: string; limit: number; offset: number }) => Promise<AuditRecord[]>;
   setFlagPolicy: (flag_name: string, protected_: boolean, mutex_with: string) => Promise<{ success: boolean; message: string }>;
   keepAlive: () => void;
+  setEventLogActive: (active: boolean) => void;
 }
 
 const DEFAULT_STATUS: GrusStatus = { flag_store: false, policy_evaluator: false, broadcaster: false, audit_logger: false };
@@ -31,6 +32,7 @@ const MAX_EVENT_LOG = 200;
 
 export function useSocket(): [SocketState, SocketActions] {
   const socketRef = useRef<Socket | null>(null);
+  const eventLogActiveRef = useRef(true);
   const [state, setState] = useState<SocketState>({
     flags: [],
     eventLog: [],
@@ -74,6 +76,7 @@ export function useSocket(): [SocketState, SocketActions] {
           ];
           flags.sort((a, b) => a.name.localeCompare(b.name));
         }
+        if (!eventLogActiveRef.current) return { ...s, flags };
         const key = `${update.name}:${update.change_type}:${update.timestamp}:${update.enabled ? 1 : 0}`;
         const hasEvent = s.eventLog.some(ev => (
           `${ev.name}:${ev.change_type}:${ev.timestamp}:${ev.enabled ? 1 : 0}` === key
@@ -146,6 +149,11 @@ export function useSocket(): [SocketState, SocketActions] {
     keepAlive: () => {
       socketRef.current?.emit('keep_alive', {});
       setState(s => ({ ...s, shutdownSeconds: null }));
+    },
+
+    setEventLogActive: (active: boolean) => {
+      eventLogActiveRef.current = active;
+      if (!active) setState(s => ({ ...s, eventLog: [] }));
     },
   }), [emit]);
 

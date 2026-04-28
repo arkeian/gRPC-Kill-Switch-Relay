@@ -50,6 +50,8 @@ body {
 
 * {
   box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--c-border) transparent;
 }
 
 ::-webkit-scrollbar {
@@ -62,6 +64,6 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--c-muted);
+  background: var(--c-border);
   border-radius: 3px;
 }

@@ -10,6 +10,16 @@ interface Props {
 
 const PAGE_SIZE = 50;
 
+function RefreshIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="1 4 1 10 7 10"/>
+      <polyline points="23 20 23 14 17 14"/>
+      <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+    </svg>
+  );
+}
+
 function fmtTime(ts: number): string {
   return new Date(ts * 1000).toLocaleString();
 }
@@ -76,7 +86,7 @@ export default function AuditHistory({ liveRecords, actions, onClose }: Props) {
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-(--c-border)">
         <span className="text-xs font-semibold text-(--c-t1) uppercase tracking-wider">Audit History</span>
         <div className="flex items-center gap-2">
-          <button onClick={() => load(page)} className="text-(--c-t2) hover:text-(--c-t1) text-xs">Refresh</button>
+          <button onClick={() => load(page)} title="Refresh" className="text-(--c-t2) hover:text-(--c-t1) flex items-center"><RefreshIcon /></button>
           <button onClick={onClose} className="text-(--c-t2) hover:text-(--c-t1) text-sm leading-none px-1">✕</button>
         </div>
       </div>
@@ -100,24 +110,27 @@ export default function AuditHistory({ liveRecords, actions, onClose }: Props) {
             </tr>
           </thead>
           <tbody>
-            {records.map((r, i) => (
-              <tr key={i} className="border-b border-(--c-row-border) hover:bg-(--c-row)">
-                <td className="px-4 py-2 text-(--c-t2) whitespace-nowrap font-mono">{fmtTime(r.changed_at)}</td>
-                <td className="px-4 py-2 font-mono text-(--c-t1)">{r.flag_name}</td>
-                <td className="px-4 py-2 whitespace-nowrap">
-                  <BoolBadge val={r.old_value} />
-                  <span className="mx-1 text-(--c-t2)">→</span>
-                  <BoolBadge val={r.new_value} />
-                </td>
-                <td className="px-4 py-2 text-(--c-t3)">{r.changed_by}</td>
-                <td className="px-4 py-2 text-(--c-t3) max-w-xs truncate">{r.reason || '-'}</td>
-                <td className="px-4 py-2">
-                  <span className={`px-1.5 py-0.5 rounded text-[10px] ${r.policy_result === 'approved' ? 'bg-[#22c55e]/15 text-[#22c55e]' : 'bg-[#ef4444]/15 text-[#ef4444]'}`}>
-                    {r.policy_result}
-                  </span>
-                </td>
-              </tr>
-            ))}
+            {records.map((r, i) => {
+              const denied = r.policy_result !== 'approved';
+              return (
+                <tr key={i} className={`border-b border-(--c-row-border) transition-colors ${denied ? 'bg-[#ef4444]/5 hover:bg-[#ef4444]/10' : 'hover:bg-(--c-row)'}`}>
+                  <td className="px-4 py-2 text-(--c-t2) whitespace-nowrap font-mono">{fmtTime(r.changed_at)}</td>
+                  <td className="px-4 py-2 font-mono text-(--c-t1)">{r.flag_name}</td>
+                  <td className="px-4 py-2 whitespace-nowrap">
+                    <BoolBadge val={r.old_value} />
+                    <span className="mx-1 text-(--c-t2)">→</span>
+                    <BoolBadge val={r.new_value} />
+                  </td>
+                  <td className="px-4 py-2 text-(--c-t3)">{r.changed_by}</td>
+                  <td className={`px-4 py-2 max-w-xs truncate ${denied ? 'text-[#ef4444]' : 'text-(--c-t3)'}`}>{r.reason || '-'}</td>
+                  <td className="px-4 py-2">
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${r.policy_result === 'approved' ? 'bg-[#22c55e]/15 text-[#22c55e]' : 'bg-[#ef4444]/15 text-[#ef4444]'}`}>
+                      {r.policy_result}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

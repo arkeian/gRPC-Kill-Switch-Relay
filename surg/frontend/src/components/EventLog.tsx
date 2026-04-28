@@ -10,6 +10,16 @@ interface Props {
 
 const PAGE_SIZE = 50;
 
+function RefreshIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="1 4 1 10 7 10"/>
+      <polyline points="23 20 23 14 17 14"/>
+      <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+    </svg>
+  );
+}
+
 const CHANGE_COLOR: Record<string, string> = {
   ENABLED: '#22c55e',
   DISABLED: '#ef4444',
@@ -46,7 +56,7 @@ export default function EventLog({ events, actions, onClose }: Props) {
       <div className="flex items-center justify-between px-4 py-2.5 border-b border-(--c-border)">
         <span className="text-xs font-semibold text-(--c-t1) uppercase tracking-wider">Live Flag Broadcast</span>
         <div className="flex items-center gap-2">
-          <button onClick={() => actions.refreshFlags()} className="text-(--c-t2) hover:text-(--c-t1) text-xs">Refresh</button>
+          <button onClick={() => actions.refreshFlags()} title="Refresh" className="text-(--c-t2) hover:text-(--c-t1) flex items-center"><RefreshIcon /></button>
           <button onClick={onClose} className="text-(--c-t2) hover:text-(--c-t1) text-sm leading-none px-1">✕</button>
         </div>
       </div>
