@@ -13,7 +13,7 @@
 
 **Grus** adalah engine feature flag real-time berbasis gRPC dan bertindak sebagai manajemen untuk seluruh status flag di sistem Anda, mulai dari kill switch darurat, circuit breaker, hingga mode eksperimen yang dapat diaktifkan dan dimatikan tanpa deploy ulang.
 
-**Surg** adalah UI wrapper berbasis web untuk Grus. Buka browser, lihat seluruh flag sistem secara live, mengubah status dalam satu klik, dan pantau setiap perubahan yang terjadi secara real-time.
+**Surg** adalah UI wrapper berbasis web dan berkomunikasi dengan Grus melewati WebSocket. Buka browser, lihat seluruh flag sistem secara live, mengubah status dalam satu klik, dan pantau setiap perubahan yang terjadi secara real-time.
 
 ---
 
